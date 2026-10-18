@@ -8,12 +8,12 @@
 //! tool-call deltas, then normalizes those parser events into internal
 //! assistant events.
 
+use aphrodite_parser::unified::{UnifiedParser, UnifiedParserEvent, UnifiedParserOutput};
+use aphrodite_text::output::{DecodedText, DecodedTextEvent, SampledDelta};
 use asynk_strim_attr::{TryYielder, try_stream};
 use futures::{StreamExt as _, pin_mut};
 use thiserror_ext::AsReport;
 use tracing::warn;
-use aphrodite_parser::unified::{UnifiedParser, UnifiedParserEvent, UnifiedParserOutput};
-use aphrodite_text::output::{DecodedText, DecodedTextEvent, SampledDelta};
 
 use crate::Result;
 use crate::error::Error;
@@ -45,25 +45,6 @@ impl UnifiedParserState {
             parser_failed: false,
             open_call_index: None,
             reasoning_tokens: 0,
-        }
-    }
-
-    /// Initialize parser state once prompt token IDs are available.
-    fn initialize(&mut self, prompt_token_ids: &[u32]) {
-        if self.parser_failed {
-            return;
-        }
-
-        match self.parser.initialize(prompt_token_ids) {
-            Ok(()) => {}
-            Err(error) => {
-                warn!(
-                    error = %error.as_report(),
-                    "failed to initialize unified parser; falling back to plain text deltas"
-                );
-                self.parser_failed = true;
-                self.open_call_index = None;
-            }
         }
     }
 
@@ -262,7 +243,6 @@ pub(crate) async fn unified_event_stream(
                 prompt_token_ids,
                 prompt_logprobs,
             } => {
-                state.initialize(&prompt_token_ids);
                 y.yield_ok(AssistantEvent::Start {
                     prompt_token_ids,
                     prompt_logprobs,
@@ -297,9 +277,10 @@ pub(crate) async fn unified_event_stream(
                             engine: finished.usage,
                             reasoning_tokens: state.reasoning_tokens,
                         },
+                        timestamps: finished.timestamps,
                         finish_reason: finished.finish_reason,
                         kv_transfer_params: finished.kv_transfer_params,
-                ec_transfer_params: finished.ec_transfer_params,
+                        ec_transfer_params: finished.ec_transfer_params,
                     })
                     .await;
                 }
@@ -314,15 +295,15 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
 
-    use futures::{StreamExt as _, stream};
     use aphrodite_parser::reasoning::ReasoningError;
-    use aphrodite_text::DecodedText;
     use aphrodite_parser::tool::{HermesToolParser, Tool, ToolCallDelta, ToolParser as _};
     use aphrodite_parser::unified::{
         CombinedParser, Gemma4UnifiedParser, UnifiedParserError, UnifiedParserOutput,
     };
+    use aphrodite_text::DecodedText;
     use aphrodite_tokenizer::test_utils::TestTokenizer;
     use aphrodite_tokenizer::{TokenAnchor, TokenAttribution};
+    use futures::{StreamExt as _, stream};
 
     use super::unified_event_stream;
     use crate::event::{AssistantBlockKind, ChatTokenUsage};
@@ -440,6 +421,8 @@ mod tests {
                 finish_reason: crate::FinishReason::Stop(None),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
+                sampling_mask: None,
+                timestamps: Default::default(),
             })),
         }
     }
@@ -761,6 +744,7 @@ mod tests {
                 },
                 AssistantEvent::Done {
                     usage: done_usage(0),
+                    timestamps: Default::default(),
                     finish_reason: crate::FinishReason::Stop(None),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
@@ -801,6 +785,7 @@ mod tests {
                 },
                 AssistantEvent::Done {
                     usage: done_usage(5),
+                    timestamps: Default::default(),
                     finish_reason: crate::FinishReason::Stop(None),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
@@ -833,6 +818,7 @@ mod tests {
                 },
                 AssistantEvent::Done {
                     usage: done_usage(2),
+                    timestamps: Default::default(),
                     finish_reason: crate::FinishReason::Stop(None),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
@@ -885,6 +871,7 @@ mod tests {
                 },
                 AssistantEvent::Done {
                     usage: done_usage(5),
+                    timestamps: Default::default(),
                     finish_reason: crate::FinishReason::Stop(None),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
@@ -903,6 +890,7 @@ mod tests {
             description: None,
             parameters: serde_json::json!({ "type": "object" }),
             strict: None,
+            defer_loading: None,
         }];
         let parser = Gemma4UnifiedParser::new(&tools, Arc::new(tokenizer)).unwrap();
         let events = vec![
@@ -930,6 +918,7 @@ mod tests {
                 },
                 AssistantEvent::Done {
                     usage: done_usage(0),
+                    timestamps: Default::default(),
                     finish_reason: crate::FinishReason::Stop(None),
                     kv_transfer_params: None,
                     ec_transfer_params: None,

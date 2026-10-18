@@ -112,7 +112,7 @@ def main():
                             error_text,
                         )
                         yield b'{"error": "Backend service error"}\n'
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error("Backend request timed out")
                 yield b'{"error": "Backend request timed out"}\n'
             except Exception as e:

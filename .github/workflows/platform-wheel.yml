@@ -204,7 +204,7 @@ jobs:
           PUSH_BEFORE: ${{ github.event.before }}
           MAX_JOBS: "64"
           NVCC_THREADS: "4"
-          CUDA_VERSION: "13.0.2"
+          CUDA_VERSION: "13.0.3"
           TORCH_CUDA_ARCH_LIST: "8.0 8.6 8.9 9.0 10.0 12.0+PTX"
         run: ./.github/scripts/build_nightly_commits.sh page-index
 
@@ -213,7 +213,7 @@ jobs:
         env:
           MAX_JOBS: "64"
           NVCC_THREADS: "4"
-          CUDA_VERSION: "13.0.2"
+          CUDA_VERSION: "13.0.3"
           TORCH_CUDA_ARCH_LIST: "8.0 8.6 8.9 9.0 10.0 12.0+PTX"
           PLATFORM_BACKEND: cuda
           PLATFORM_ARCHITECTURE: x86_64

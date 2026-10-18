@@ -17,8 +17,7 @@ logger = init_logger(__name__)
 
 
 class FixFunctionalizationPass(AphroditeInductorPass):
-    """
-    This pass defunctionalizes certain nodes to avoid redundant tensor copies.
+    """This pass defunctionalizes certain nodes to avoid redundant tensor copies.
     After this pass, DCE (dead-code elimination) should never be run,
     as de-functionalized nodes may appear as dead code.
 
@@ -28,7 +27,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
     @AphroditeInductorPass.time_and_log
     def __call__(self, graph: torch.fx.Graph) -> None:
         # XPU does not support auto-functionalization yet.
-        # Will enable this when switch to aphrodite-xpu-kernels.
+        # Will enable this when switching to vllm-xpu-kernels.
         if current_platform.is_xpu():
             logger.debug("XPU platform does not support fix functionalizationpass currently.")
             return
@@ -115,6 +114,19 @@ class FixFunctionalizationPass(AphroditeInductorPass):
                     3: "norm_out",
                     4: "quant_out",
                     5: "scale_out",
+                }
+                self.defunctionalize(graph, node, mutated_args)
+            elif (
+                hasattr(
+                    torch.ops.aphrodite,
+                    "flashinfer_fused_add_rms_norm_nvfp4_quant",
+                )
+                and at_target == torch.ops.aphrodite.flashinfer_fused_add_rms_norm_nvfp4_quant.default
+            ):
+                mutated_args = {
+                    1: "result",
+                    2: "result_block_scale",
+                    3: "residual",
                 }
                 self.defunctionalize(graph, node, mutated_args)
             # For some reason we need to specify the args for both
@@ -230,9 +242,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
         self.nodes_to_remove.clear()
 
     def _remove(self, node_or_nodes: torch.fx.Node | Iterable[torch.fx.Node]) -> None:
-        """
-        Stage a node (or nodes) for removal at the end of the pass.
-        """
+        """Stage a node (or nodes) for removal at the end of the pass."""
         if isinstance(node_or_nodes, torch.fx.Node):
             self.nodes_to_remove.append(node_or_nodes)
         else:
@@ -245,8 +255,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
         mutated_args: dict[int, torch.fx.Node | str],
         args: tuple[torch.fx.Node | str, ...] | None = None,
     ) -> None:
-        """
-        De-functionalize a node by replacing it with a call to the original.
+        """De-functionalize a node by replacing it with a call to the original.
         It also replaces the getitem users with the mutated arguments.
         See replace_users_with_mutated_args and insert_defunctionalized.
         """
@@ -257,14 +266,14 @@ class FixFunctionalizationPass(AphroditeInductorPass):
     def replace_users_with_mutated_args(
         self, node: torch.fx.Node, mutated_args: dict[int, torch.fx.Node | str]
     ) -> None:
-        """
-        Replace mutated getitem users of the auto-functionalized node with the
+        """Replace mutated getitem users of the auto-functionalized node with the
         mutated arguments.
 
         Args:
             node: The auto-functionalized node
             mutated_args: The mutated arguments, indexed by getitem index.
                 If the value of an arg is a string, `node.kwargs[arg]` is used.
+
         """
         for idx, user in self.getitem_users(node).items():
             # Some functionalized nodes may return both a result at getitem[0]
@@ -278,8 +287,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
             self._remove(user)
 
     def getitem_users(self, node: torch.fx.Node) -> dict[int, torch.fx.Node]:
-        """
-        Returns the operator.getitem users of the auto-functionalized node,
+        """Returns the operator.getitem users of the auto-functionalized node,
         indexed by the index they are getting.
         """
         users = {}
@@ -295,8 +303,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
         node: torch.fx.Node,
         args: tuple[torch.fx.Node | str, ...] | None = None,
     ) -> None:
-        """
-        Insert a new defunctionalized node into the graph before node.
+        """Insert a new defunctionalized node into the graph before node.
         If one of the kwargs is 'out', provide args directly,
         as node.kwargs cannot be used.
         See https://github.com/pytorch/pytorch/blob/a00faf440888ffb724bad413f329a49e2b6388e7/torch/_inductor/lowering.py#L351
@@ -306,6 +313,7 @@ class FixFunctionalizationPass(AphroditeInductorPass):
             node: The auto-functionalized node to defunctionalize
             args: If we cannot use kwargs, specify args directly.
                 If an arg is a string, `node.kwargs[arg]` is used.
+
         """  # noqa: E501
         assert is_func(node, auto_functionalized), f"node must be auto-functionalized, is {node} instead"
 

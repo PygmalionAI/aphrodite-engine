@@ -24,6 +24,7 @@ class FakeGuard:
         self.retry_position = -1
         self.blocked = []
         self.logprobs = None
+        self.prompt_token_id_logprobs = None
 
     def decode(self, token):
         return {10: "Once", 11: " upon", 12: " time", 13: "Fine."}[token]

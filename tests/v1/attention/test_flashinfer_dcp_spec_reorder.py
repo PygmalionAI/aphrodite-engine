@@ -12,6 +12,7 @@ if not current_platform.is_cuda():
 import torch
 
 from aphrodite.config import SpeculativeConfig, set_current_aphrodite_config
+from aphrodite.v1.attention.backend import AttentionCGSupport
 from aphrodite.v1.attention.backends import flashinfer as flashinfer_backend
 from aphrodite.v1.attention.backends.flashinfer import (
     FlashInferDecodeKernel,
@@ -74,3 +75,7 @@ def test_flashinfer_gqa_dcp_spec_decode_clamps_reorder_threshold(monkeypatch):
 
     assert builder.flashinfer_trtllm_api_decode_kernel == FlashInferDecodeKernel.TRTLLM_GEN
     assert builder.reorder_batch_threshold == 1
+    assert (
+        FlashInferMetadataBuilder.get_cudagraph_support(aphrodite_config, kv_cache_spec)
+        == AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE
+    )

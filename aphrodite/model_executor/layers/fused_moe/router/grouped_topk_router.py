@@ -8,6 +8,7 @@ from aphrodite import _custom_ops as ops
 from aphrodite import envs as envs
 from aphrodite._aiter_ops import rocm_aiter_ops
 from aphrodite.distributed.eplb.eplb_state import EplbLayerState
+from aphrodite.forward_context import get_forward_context, is_forward_context_available
 from aphrodite.model_executor.custom_op import CustomOp
 from aphrodite.model_executor.layers.fused_moe.config import (
     RoutingMethodType,
@@ -90,7 +91,7 @@ def grouped_topk(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if (
         envs.APHRODITE_USE_FUSED_MOE_GROUPED_TOPK
-        and current_platform.is_cuda()
+        and (current_platform.is_cuda() or current_platform.is_xpu())
         and num_expert_group <= 32
         and topk <= 32
         and e_score_correction_bias is not None
@@ -246,6 +247,7 @@ class GroupedTopKRouter(BaseRouter):
         e_score_correction_bias: torch.Tensor | None = None,
         num_fused_shared_experts: int = 0,
         eplb_state: EplbLayerState | None = None,
+        skip_padding: bool = False,
     ):
         super().__init__(
             top_k=top_k,
@@ -259,6 +261,7 @@ class GroupedTopKRouter(BaseRouter):
         self.routed_scaling_factor = routed_scaling_factor
         self.e_score_correction_bias = e_score_correction_bias
         self.num_fused_shared_experts = num_fused_shared_experts
+        self.skip_padding = skip_padding
 
     @property
     def routing_method_type(self) -> RoutingMethodType:
@@ -268,7 +271,6 @@ class GroupedTopKRouter(BaseRouter):
             renormalize=self.renormalize,
             num_expert_group=self.num_expert_group,
             has_e_score_bias=self.e_score_correction_bias is not None,
-            routed_scaling_factor=self.routed_scaling_factor,
         )
 
     def _compute_routing(
@@ -333,5 +335,12 @@ class GroupedTopKRouter(BaseRouter):
             routed_scaling_factor=self.routed_scaling_factor,
             e_score_correction_bias=self.e_score_correction_bias,
         )
+
+        if self.skip_padding and envs.APHRODITE_MOE_SKIP_PADDING and is_forward_context_available():
+            is_padding = get_forward_context().is_padding
+            if is_padding is not None:
+                is_padding = is_padding[: topk_ids.shape[0]].unsqueeze(1)
+                topk_weights = topk_weights.masked_fill(is_padding, 0)
+                topk_ids = topk_ids.masked_fill(is_padding, -1)
 
         return topk_weights, topk_ids

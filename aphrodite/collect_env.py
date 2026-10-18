@@ -289,7 +289,7 @@ def get_xpu_runtime_version():
 def get_pkg_version(run_lambda, pkg):
     assert get_platform() == "linux"
 
-    if pkg in ["aphrodite_xpu_kernels", "oneccl"]:
+    if pkg in ["vllm_xpu_kernels", "oneccl"]:
         rc, out, _ = run_lambda(f"pip show {pkg}")
         if rc == 0:
             match = re.search(r"Version: (.*)", out)
@@ -376,7 +376,7 @@ def get_libigdgmm_version(run_lambda):
 
 
 def get_aphrodite_xpu_kernels_version(run_lambda):
-    return get_pkg_version(run_lambda, "aphrodite_xpu_kernels")
+    return get_pkg_version(run_lambda, "vllm_xpu_kernels")
 
 
 def get_intel_gpu_models():

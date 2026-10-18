@@ -254,6 +254,9 @@ def _should_extract(filename: str, *, extensions: bool, rust: bool) -> bool:
         return False
     if extensions and filename.startswith("aphrodite/") and filename.endswith(".so"):
         return True
+    if extensions and filename.startswith("aphrodite/libs/") and ".so." in PurePosixPath(filename).name:
+        # CPU wheels bundle versioned tcmalloc libraries alongside extensions.
+        return True
     rust_extension = (
         filename.startswith("aphrodite/_rust_")
         and filename.endswith(".so")
@@ -311,6 +314,16 @@ def _remove_previous_artifacts(root: Path, manifest: dict | None) -> None:
             target.unlink()
 
 
+def _remove_legacy_deepgemm_bindings(root: Path, paths: list[str]) -> None:
+    package = "aphrodite/third_party/deep_gemm"
+    if f"{package}/_C.py" not in paths or f"{package}/_C_extension.abi3.so" not in paths:
+        return
+    for pattern in ("_C.cpython-*.so", "_C.abi3.so"):
+        for stale_binding in (root / package).glob(pattern):
+            if stale_binding.is_file() or stale_binding.is_symlink():
+                stale_binding.unlink()
+
+
 def extract_precompiled_wheel(
     root: Path,
     candidate: WheelCandidate,
@@ -329,6 +342,7 @@ def extract_precompiled_wheel(
         and all((root / path).is_file() for path in previous["paths"])
     ):
         print(f"Reusing {len(previous['paths'])} previously extracted precompiled artifacts")
+        _remove_legacy_deepgemm_bindings(root, previous["paths"])
         return _package_data_patch(previous["paths"])
 
     with tempfile.TemporaryDirectory(prefix="aphrodite-precompiled-") as temp_dir:
@@ -385,6 +399,7 @@ def extract_precompiled_wheel(
             shutil.copy2(staged_source, target)
             paths.append(member.filename)
             print(f"[extract] {member.filename}")
+        _remove_legacy_deepgemm_bindings(root, paths)
 
     manifest_path = root / MANIFEST_PATH
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

@@ -57,8 +57,7 @@ bytestr: TypeAlias = bytes | bytearray | memoryview | zmq.Frame
 class OOBTensorConsumer(ABC):
     @abstractmethod
     def __call__(self, tensor: torch.Tensor) -> dict | None:
-        """
-        Called with tensors for the current message.
+        """Called with tensors for the current message.
         Returns None to reject the tensor (falls back to regular serialization),
         otherwise a dict with arbitrary placeholder data to be included
         in the serialized message.
@@ -218,10 +217,11 @@ class MsgpackEncoder:
 
         return msgpack.Ext(CUSTOM_TYPE_PICKLE, pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
 
-    def _encode_ndarray(self, obj: np.ndarray) -> tuple[str, tuple[int, ...], int | memoryview]:
+    def _encode_ndarray(self, obj: np.ndarray) -> tuple[str, tuple[int, ...], int | msgpack.Ext]:
         assert self.aux_buffers is not None
         # If the array is non-contiguous, we need to copy it first
         arr_data = obj.data if obj.flags.c_contiguous else obj.tobytes()
+        data: int | msgpack.Ext
         if not obj.shape or obj.nbytes < self.size_threshold:
             # Encode small arrays and scalars inline. Using this extension type
             # ensures we can avoid copying when decoding.
@@ -236,13 +236,15 @@ class MsgpackEncoder:
         # backing buffers that we've stashed in `aux_buffers`.
         return obj.dtype.str, obj.shape, data
 
-    def _encode_tensor(self, obj: torch.Tensor) -> tuple[str, tuple[int, ...], int | dict | memoryview]:
+    def _encode_tensor(self, obj: torch.Tensor) -> tuple[str, tuple[int, ...], int | dict | msgpack.Ext]:
         oob_consumer = self.oob_tensor_consumer
+        data: int | dict | msgpack.Ext
         # view the tensor as a contiguous 1D array of bytes
         if obj.nbytes < self.size_threshold and obj.is_cpu:
             # Smaller tensors are encoded inline, just like ndarrays.
             data = msgpack.Ext(CUSTOM_TYPE_RAW_VIEW, tensor_data(obj))
-        elif oob_consumer is not None and (data := oob_consumer(obj)) is not None:
+        elif oob_consumer is not None and (oob_data := oob_consumer(obj)) is not None:
+            data = oob_data
             assert isinstance(data, dict)
         else:
             # Otherwise encode index of backing buffer to avoid copy.
@@ -311,12 +313,13 @@ class MsgpackDecoder:
             _log_insecure_serialization_warning()
 
     def decode(self, bufs: bytestr | Sequence[bytestr]) -> Any:
-        if isinstance(bufs, bytestr):  # type: ignore
+        if isinstance(bufs, (bytes, bytearray, memoryview, zmq.Frame)):
             return self.decoder.decode(bufs)
 
-        self.aux_buffers = bufs
+        aux_buffers: Sequence[bytestr] = bufs
+        self.aux_buffers = aux_buffers
         try:
-            return self.decoder.decode(bufs[0])
+            return self.decoder.decode(aux_buffers[0])
         finally:
             self.aux_buffers = ()
 
@@ -450,8 +453,7 @@ def run_method(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
-    """
-    Run a method of an object with the given arguments and keyword arguments.
+    """Run a method of an object with the given arguments and keyword arguments.
     If the method is string, it will be converted to a method using getattr.
     If the method is serialized bytes and will be deserialized using
     cloudpickle.
@@ -485,14 +487,13 @@ class PydanticMsgspecMixin:
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
-        """
-        Make msgspec.Struct compatible with Pydantic, respecting defaults.
+        """Make msgspec.Struct compatible with Pydantic, respecting defaults.
         Handle JSON=>msgspec.Struct. Used when exposing msgspec.Struct to the
         API as input or in `/docs`. Note this is cached by Pydantic and not
         called on every validation.
         """
         msgspec_fields = {f.name: f for f in msgspec.structs.fields(source_type)}
-        type_hints = get_type_hints(source_type)
+        type_hints = get_type_hints(source_type, include_extras=True)
 
         # Build the Pydantic typed_dict_field for each msgspec field
         fields = {}

@@ -21,10 +21,9 @@ import os
 import socket
 import tempfile
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import nullcontext
-from enum import Enum
-from typing import Any, Callable, TypedDict, TypeVar, cast, TYPE_CHECKING, Optional
+from typing import Any, Callable, Literal, TypedDict, TypeAlias, TypeVar, cast, overload, TYPE_CHECKING, Optional
 
 import numpy as np
 import pytest
@@ -60,7 +59,7 @@ from aphrodite.distributed import (
     initialize_model_parallel,
 )
 from aphrodite.logger import init_logger
-from aphrodite.logprobs import Logprob
+from aphrodite.logprobs import Logprob, PromptLogprobs, SampleLogprobs
 from aphrodite.multimodal.media import MediaWithBytes
 from aphrodite.multimodal.utils import fetch_image
 from aphrodite.outputs import RequestOutput
@@ -77,6 +76,17 @@ if TYPE_CHECKING:
     from transformers import PythonBackend, TokenizersBackend
     from transformers.generation.utils import GenerateOutput
 
+
+_TokensTextLogprobsPromptIds = tuple[list[int], str, SampleLogprobs | None, list[int] | None]
+_TokensTextLogprobsPromptIdsPromptLogprobs = tuple[
+    list[int], str, SampleLogprobs | None, list[int] | None, PromptLogprobs | None
+]
+_GenerateLogprobsOutput: TypeAlias = (
+    TokensTextLogprobs
+    | TokensTextLogprobsPromptLogprobs
+    | _TokensTextLogprobsPromptIds
+    | _TokensTextLogprobsPromptIdsPromptLogprobs
+)
 
 logger = init_logger(__name__)
 
@@ -131,8 +141,6 @@ def sample_json_schema():
 
 _TEST_DIR = os.path.dirname(__file__)
 _TEST_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "example.txt")]
-_LONG_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "summary.txt")]
-_SYS_MSG = os.path.join(_TEST_DIR, "system_messages", "sonnet3.5_nov2024.txt")
 
 _M = TypeVar("_M")
 
@@ -240,7 +248,7 @@ def dist_init():
                 rank=0,
                 distributed_init_method=f"file://{temp_file}",
                 local_rank=0,
-                backend="nccl",
+                backend="gloo" if current_platform.is_cpu() else "nccl",
             )
             initialize_model_parallel(1, 1)
             yield
@@ -308,25 +316,6 @@ def dynamo_reset():
 @pytest.fixture
 def example_prompts() -> list[str]:
     return [prompt for filename in _TEST_PROMPTS for prompt in _read_prompts(filename)]
-
-
-@pytest.fixture
-def example_system_message() -> str:
-    with open(_SYS_MSG) as f:
-        return f.read()
-
-
-class DecoderPromptType(Enum):
-    """For encoder/decoder models only."""
-
-    CUSTOM = 1
-    NONE = 2
-    EMPTY_STR = 3
-
-
-@pytest.fixture
-def example_long_prompts() -> list[str]:
-    return [prompt for filename in _LONG_PROMPTS for prompt in _read_prompts(filename)]
 
 
 @pytest.fixture(scope="session")
@@ -498,6 +487,34 @@ class HfRunner:
                     )
                     if model_cls is not None:
                         _fix_v4_tied_weights_keys(model_cls)
+
+            from transformers.integrations import is_deepspeed_zero3_enabled
+
+            # On ROCm, avoid a converted CPU copy when downcasting FP32 references.
+            # Same-dtype CPU loads can stay lazily mapped and use less host RAM.
+            # Leave customized, remote, and quantized loading unchanged.
+            if (
+                current_platform.is_rocm()
+                and self.device == "cuda"
+                and auto_cls is AutoModelForCausalLM
+                and revision is None
+                and model_kwargs.keys() == {"dtype"}
+                and self.config.dtype == torch.float32
+                and model_kwargs["dtype"] in (torch.float16, torch.bfloat16)
+                and not (trust_remote_code and hasattr(self.config, "auto_map"))
+                and getattr(self.config, "quantization_config", None) is None
+                and getattr(
+                    self.config.get_text_config(decoder=True),
+                    "quantization_config",
+                    None,
+                )
+                is None
+                and not is_deepspeed_zero3_enabled()
+            ):
+                model_kwargs = {
+                    **model_kwargs,
+                    "device_map": torch.device("cuda", torch.accelerator.current_device_index()),
+                }
 
             model = cast(
                 nn.Module,
@@ -868,16 +885,13 @@ class HfRunner:
             # shutdown. This is helpful in cases where the HfRunner is
             # initialized after significant GPU memory is already occupied,
             # e.g. in
-            # tests/basic_correctness/test_basic_correctness.py::test_models_distributed
+            # tests/basic_correctness/models/test_basic_correctness.py::test_models_distributed
             # where aphrodite worker processes are still alive and holding GPU
             # memory when hf_runner.__exit__ is called.
-            from tests.utils import (
-                get_physical_device_indices,
-                record_gpu_memory_usage_stats,
-            )
+            from tests.utils import record_gpu_memory_usage_stats
 
             if (device_count := current_platform.device_count()) > 0:
-                devices = get_physical_device_indices(devices=list(range(device_count)))
+                devices = list(range(device_count))
                 mem_usage_stats = record_gpu_memory_usage_stats(devices=devices)
                 self.threshold_ratios = {
                     device: 0.05 + mem_used / mem_tot for device, (mem_used, mem_tot) in mem_usage_stats.items()
@@ -902,7 +916,7 @@ def hf_runner():
 
 
 def _default_block_size() -> int:
-    if torch.xpu.is_available():
+    if current_platform.is_xpu():
         return 64
     if current_platform.is_cpu():
         return 128
@@ -922,6 +936,8 @@ class AphroditeRunner:
     - `enable_chunked_prefill`: Set to `False` instead of `None` for
       test reproducibility.
     - `enforce_eager`: Set to `False` to test CUDA graph.
+    - `kernel_config.enable_jit_warmup`: Set to `False` to reduce test startup
+      time.
     """
 
     def __init__(
@@ -949,6 +965,8 @@ class AphroditeRunner:
             if default_torch_num_threads is None
             else set_default_torch_num_threads(default_torch_num_threads)
         )
+
+        kwargs.setdefault("kernel_config", {"enable_jit_warmup": False})
 
         if not kwargs.get("compilation_config", None):
             # Note(@tdoublep): This is set to 4 because some tests (e.g., hybrid
@@ -1091,8 +1109,8 @@ class AphroditeRunner:
     def _final_steps_generate_w_logprobs(
         req_outputs: list[RequestOutput],
         include_prompt_token_ids: bool = False,
-    ) -> list[TokensTextLogprobsPromptLogprobs]:
-        outputs: list[TokensTextLogprobsPromptLogprobs] = []
+    ) -> list[TokensTextLogprobsPromptLogprobs | _TokensTextLogprobsPromptIdsPromptLogprobs]:
+        outputs: list[TokensTextLogprobsPromptLogprobs | _TokensTextLogprobsPromptIdsPromptLogprobs] = []
         for req_output in req_outputs:
             assert len(req_output.outputs) > 0
             for sample in req_output.outputs:
@@ -1101,7 +1119,7 @@ class AphroditeRunner:
                 output_logprobs = sample.logprobs
             if include_prompt_token_ids:
                 outputs.append(
-                    (  # type: ignore[arg-type]
+                    (
                         output_ids,
                         output_str,
                         output_logprobs,
@@ -1121,6 +1139,19 @@ class AphroditeRunner:
 
         return outputs
 
+    @overload
+    def generate_w_logprobs(
+        self,
+        prompts: list[str],
+        sampling_params: SamplingParams,
+        images: PromptImageInput | None = None,
+        audios: PromptAudioInput | None = None,
+        videos: PromptVideoInput | None = None,
+        include_prompt_token_ids: Literal[False] = False,
+        **kwargs: Any,
+    ) -> list[TokensTextLogprobs] | list[TokensTextLogprobsPromptLogprobs]: ...
+
+    @overload
     def generate_w_logprobs(
         self,
         prompts: list[str],
@@ -1130,7 +1161,18 @@ class AphroditeRunner:
         videos: PromptVideoInput | None = None,
         include_prompt_token_ids: bool = False,
         **kwargs: Any,
-    ) -> list[TokensTextLogprobs] | list[TokensTextLogprobsPromptLogprobs]:
+    ) -> Sequence[_GenerateLogprobsOutput]: ...
+
+    def generate_w_logprobs(
+        self,
+        prompts: list[str],
+        sampling_params: SamplingParams,
+        images: PromptImageInput | None = None,
+        audios: PromptAudioInput | None = None,
+        videos: PromptVideoInput | None = None,
+        include_prompt_token_ids: bool = False,
+        **kwargs: Any,
+    ) -> Sequence[_GenerateLogprobsOutput]:
         inputs = self.get_inputs(prompts, images=images, videos=videos, audios=audios)
 
         req_outputs = self.llm.generate(inputs, sampling_params=sampling_params, **kwargs)
@@ -1343,20 +1385,25 @@ def aphrodite_runner():
 
 
 @pytest.fixture()
-def temporary_enable_log_propagate():
+def temporary_enable_log_propagate(monkeypatch):
     import logging
 
-    logger = logging.getLogger("aphrodite")
-    logger.propagate = True
-    yield
-    logger.propagate = False
+    from aphrodite.logger import DEFAULT_LOGGING_CONFIG
+
+    # The first LLM init in a process reapplies DEFAULT_LOGGING_CONFIG, which
+    # would otherwise turn propagation back off mid-test.
+    monkeypatch.setitem(DEFAULT_LOGGING_CONFIG["loggers"]["aphrodite"], "propagate", True)
+    monkeypatch.setattr(logging.getLogger("aphrodite"), "propagate", True)
 
 
 @pytest.fixture()
 def caplog_aphrodite(temporary_enable_log_propagate, caplog):
-    # To capture aphrodite log, we should enable propagate=True temporarily
-    # because caplog depends on logs propagated to the root logger.
-    yield caplog
+    # caplog depends on logs propagated to the root logger. The Aphrodite logger
+    # inherits this INFO level until runtime initialization configures it.
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        yield caplog
 
 
 @pytest.fixture()
@@ -1699,6 +1746,24 @@ def disable_deepgemm_ue8m0(monkeypatch):
         # Clear cache so the next time it is used it is processed with the
         # default APHRODITE_USE_DEEP_GEMM_E8M0  setting.
         is_deep_gemm_e8m0_used.cache_clear()
+
+
+@pytest.fixture
+def gpu_memory_cleared():
+    """Wait for prior tests to release GPU memory on gfx950."""
+    if not current_platform.is_rocm():
+        return
+
+    from tests.utils import wait_for_gpu_memory_to_clear
+    from aphrodite.platforms.rocm import on_gfx950
+
+    if on_gfx950():
+        wait_for_gpu_memory_to_clear(
+            devices=[0],
+            threshold_ratio=0.08,
+            timeout_s=30,
+            stable_duration_s=1,
+        )
 
 
 def _should_clean_gpu_memory_between_tests() -> bool:

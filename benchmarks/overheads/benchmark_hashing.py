@@ -37,7 +37,7 @@ def main(args):
     total_time = 0
     total_calls = 0
     for func in stats.stats:
-        if "hash_of_block" in func[2]:
+        if "hash_block_tokens" in func[2]:
             total_time = stats.stats[func][3]
             total_calls = stats.stats[func][0]
     percentage = (total_time / stats.total_tt) * 100

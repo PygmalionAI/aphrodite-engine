@@ -183,6 +183,7 @@ EXPECTED_METRICS_V1 = [
     "aphrodite:prefix_cache_queries",
     "aphrodite:prefix_cache_hits",
     "aphrodite:num_preemptions_total",
+    "aphrodite:admission_rejections_total",
     "aphrodite:prompt_tokens_total",
     "aphrodite:generation_tokens_total",
     "aphrodite:iteration_tokens_total",
@@ -388,8 +389,7 @@ async def _poll_until(predicate, *, timeout: float, interval: float = 0.5, descr
 
 
 def _get_running_metrics_from_api(server: RemoteOpenAIServer):
-    """Return (running_count, waiting_count, kv_cache_usage)"""
-
+    """Return (running_count, waiting_count, kv_cache_usage)."""
     response = requests.get(server.url_for("metrics"))
     assert response.status_code == HTTPStatus.OK
 

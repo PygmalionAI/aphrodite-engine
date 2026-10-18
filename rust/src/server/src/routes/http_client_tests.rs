@@ -10,18 +10,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
-};
-use futures::StreamExt as _;
-use serial_test::serial;
 use aphrodite_chat::{
     ChatBackend, ChatLlm, ChatRenderer, ChatRequest, ChatTextBackend, DefaultChatOutputProcessor,
     DynChatOutputProcessor, DynChatRenderer, NewChatOutputProcessorOptions, RenderedPrompt,
 };
-use aphrodite_engine_core_client::protocol::output::{EngineCoreFinishReason, EngineCoreOutput, EngineCoreOutputs, RequestBatchOutputs};
+use aphrodite_engine_core_client::protocol::output::{
+    EngineCoreFinishReason, EngineCoreOutput, EngineCoreOutputs, RequestBatchOutputs,
+};
 use aphrodite_engine_core_client::protocol::request::EngineCoreRequest;
 use aphrodite_engine_core_client::test_utils::{IpcNamespace, spawn_mock_engine_task};
 use aphrodite_engine_core_client::{EngineCoreClient, EngineCoreClientConfig, EngineId};
@@ -29,6 +24,13 @@ use aphrodite_llm::Llm;
 use aphrodite_text::tokenizer::DynTokenizer;
 use aphrodite_text::{Prompt, TextBackend};
 use aphrodite_tokenizer::test_utils::TestTokenizer;
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
+use async_openai::types::chat::{
+    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
+};
+use futures::StreamExt as _;
+use serial_test::serial;
 use zeromq::prelude::{SocketRecv, SocketSend};
 use zeromq::{DealerSocket, PushSocket, ZmqMessage};
 
@@ -166,6 +168,7 @@ impl ChatBackend for FakeChatBackend {
             self.tokenizer(),
             options.tool_call_parser,
             options.reasoning_parser,
+            options.tool_strict_level,
         )?))
     }
 }
@@ -184,6 +187,7 @@ impl ChatRenderer for FakeChatBackend {
         }
         Ok(RenderedPrompt {
             prompt: Prompt::Text(prompt),
+            media_order: None,
             effective_template_kwargs: Default::default(),
         })
     }

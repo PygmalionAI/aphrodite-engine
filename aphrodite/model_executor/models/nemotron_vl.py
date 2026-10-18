@@ -5,9 +5,13 @@ from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, PretrainedConfig
+from transformers import AutoModel, PreTrainedConfig
 
 from aphrodite.config import AphroditeConfig
+from aphrodite.model_executor.layers.fusion.mm_input_norm import (
+    FusedMMInputNorm,
+    IdentityInputNorm,
+)
 from aphrodite.model_executor.layers.linear import ReplicatedLinear
 from aphrodite.model_executor.layers.pooler import DispatchPooler
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
@@ -26,6 +30,8 @@ from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.sequence import IntermediateTensors
 from aphrodite.transformers_utils.processor import cached_image_processor_from_config
 from aphrodite.transformers_utils.processors.nemotron_vl import (
+    SIGLIP_MEAN,
+    SIGLIP_STD,
     LlamaNemotronNanoVLImageProcessor,
     LlamaNemotronNanoVLProcessor,
     LlamaNemotronVLEmbedImageProcessor,
@@ -132,12 +138,12 @@ class LlamaNemotronVLChatModel(nn.Module, SupportsMultiModal, SupportsPP, Suppor
                 prefix=maybe_prefix(prefix, "language_model"),
             )
 
-        self.img_context_token_id = None
+        self.img_context_token_id: int | None = None
 
         self.visual_token_mask = None
         self.make_empty_intermediate_tensors = self.language_model.make_empty_intermediate_tensors
 
-    def _patch_quant_config(self, config: PretrainedConfig, quant_config: QuantizationConfig):
+    def _patch_quant_config(self, config: PreTrainedConfig, quant_config: QuantizationConfig | None):
         # the awq models from OpenGVLab missing `modules_to_not_convert`
         # patch the quant_config to add `modules_to_not_convert` back
         if isinstance(quant_config, AutoAWQConfig):
@@ -148,7 +154,7 @@ class LlamaNemotronVLChatModel(nn.Module, SupportsMultiModal, SupportsPP, Suppor
 
     def _init_vision_model(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None,
         *,
         prefix: str,
@@ -160,7 +166,7 @@ class LlamaNemotronVLChatModel(nn.Module, SupportsMultiModal, SupportsPP, Suppor
 
     def _init_mlp1(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         vit_hidden_size: int | None = None,
         vision_projection_hidden_size: int | None = None,
     ) -> nn.Module:
@@ -366,9 +372,7 @@ class LlamaNemotronVLChatModel(nn.Module, SupportsMultiModal, SupportsPP, Suppor
         return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
 
     def get_mm_mapping(self) -> MultiModelKeys:
-        """
-        Get the module prefix in multimodal models
-        """
+        """Get the module prefix in multimodal models."""
         return MultiModelKeys.from_string_field(
             language_model="language_model",
             connector="mlp1",
@@ -446,8 +450,7 @@ class LlamaNemotronVLEmbedProcessingInfo(BaseInternVLProcessingInfo):
     dummy_inputs=BaseInternVLDummyInputsBuilder[LlamaNemotronVLEmbedProcessingInfo],
 )
 class LlamaNemotronVLForEmbedding(LlamaNemotronVLChatModel, AphroditeModelForPooling):
-    """
-    LlamaNemotronVL model for embeddings.
+    """LlamaNemotronVL model for embeddings.
 
     Inherits from LlamaNemotronVLChatModel and specializes it for embedding tasks:
     - Uses SigLIP vision encoder instead of C-RADIO
@@ -456,6 +459,7 @@ class LlamaNemotronVLForEmbedding(LlamaNemotronVLChatModel, AphroditeModelForPoo
     """
 
     is_pooling_model = True
+    supports_mm_device_do_normalize = True
 
     # Weight mapping from checkpoint format to Aphrodite format
     # Different from parent class due to different vision model structure
@@ -480,6 +484,15 @@ class LlamaNemotronVLForEmbedding(LlamaNemotronVLChatModel, AphroditeModelForPoo
         # Override: get img_context_token_id from config (parent sets None)
         self.img_context_token_id = getattr(config, "img_context_token_id", None)
 
+        if self.model_config.get_multimodal_config().mm_device_do_normalize:
+            self.input_norm = FusedMMInputNorm(
+                image_mean=list(SIGLIP_MEAN),
+                image_std=list(SIGLIP_STD),
+                rescale_factor=1 / 255,
+            )
+        else:
+            self.input_norm = IdentityInputNorm()
+
         # Initialize pooler for embedding output
         pooler_config = aphrodite_config.model_config.pooler_config
         assert pooler_config is not None
@@ -487,7 +500,7 @@ class LlamaNemotronVLForEmbedding(LlamaNemotronVLChatModel, AphroditeModelForPoo
 
     def _init_vision_model(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config,
         *,
         prefix: str,
@@ -500,16 +513,27 @@ class LlamaNemotronVLForEmbedding(LlamaNemotronVLChatModel, AphroditeModelForPoo
             use_head=False,
         )
 
-    def _init_mlp1(self, config: PretrainedConfig) -> nn.Module:
+    def _init_mlp1(
+        self,
+        config: PreTrainedConfig,
+        vit_hidden_size: int | None = None,
+        vision_projection_hidden_size: int | None = None,
+    ) -> nn.Module:
         """Override to use different MLP structure for embedding model."""
+        if vit_hidden_size is None:
+            vit_hidden_size = config.vision_config.hidden_size
+        if vision_projection_hidden_size is None:
+            vision_projection_hidden_size = config.get_text_config().hidden_size
         return super()._init_mlp1(
             config,
-            vit_hidden_size=config.vision_config.hidden_size,
-            vision_projection_hidden_size=config.get_text_config().hidden_size,
+            vit_hidden_size=vit_hidden_size,
+            vision_projection_hidden_size=vision_projection_hidden_size,
         )
 
     def _call_vision_model(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Override to handle SigLIP interface."""
+        original_shape = pixel_values.shape
+        pixel_values = self.input_norm(pixel_values.flatten(start_dim=1), self.vision_model.dtype).view(original_shape)
         return self.vision_model(pixel_values)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:

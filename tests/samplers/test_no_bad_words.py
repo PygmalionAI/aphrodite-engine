@@ -8,11 +8,12 @@ Run `pytest tests/samplers/test_no_bad_words.py`.
 
 from transformers import AutoTokenizer
 
-from aphrodite import LLM, SamplingParams
+from aphrodite import SamplingParams
+from tests.conftest import AphroditeRunner
 
 
 def _generate(
-    llm: LLM,
+    llm: AphroditeRunner,
     prompt: str,
     num_prompt_tokens: int,
     temperature: float = 0,
@@ -54,7 +55,7 @@ class TestOneTokenBadWord:
             output_token_ids = self._generate(llm, bad_words=[self.TARGET_TOKEN])
             assert self.target_token_id not in output_token_ids
 
-    def _generate(self, llm: LLM, bad_words: list[str] | None = None) -> list[int]:
+    def _generate(self, llm: AphroditeRunner, bad_words: list[str] | None = None) -> list[int]:
         return _generate(
             llm=llm,
             prompt=self.PROMPT,
@@ -131,7 +132,7 @@ class TestTwoTokenBadWord:
             assert not self._contains(output_token_ids, [self.target_token_id1, self.neighbour_token_id2])
             assert (self.target_token_id2 in output_token_ids) or (self.neighbour_token_id2 in output_token_ids)
 
-    def _generate(self, llm: LLM, bad_words: list[str] | None = None) -> list[int]:
+    def _generate(self, llm: AphroditeRunner, bad_words: list[str] | None = None) -> list[int]:
         return _generate(
             llm=llm,
             prompt=self.PROMPT,

@@ -14,7 +14,7 @@ from aphrodite.tool_parsers.hermes_tool_parser import Hermes2ProToolParser
 from aphrodite.transformers_utils.repo_utils import hf_api
 from tests.utils import RemoteOpenAIServer
 
-LORA_MODEL = "minpeter/LoRA-Llama-3.2-1B-tool-aphrodite-ci"
+LORA_MODEL = "minpeter/LoRA-Llama-3.2-1B-tool-vllm-ci"
 
 TOOLS = [
     {
@@ -146,7 +146,6 @@ PRODUCT_MESSAGES = [
 @pytest.mark.asyncio
 async def test_non_streaming_tool_call(client: openai.AsyncOpenAI, server_config: ServerConfig):
     """Test tool call in non-streaming mode."""
-
     response = await client.chat.completions.create(
         model=server_config["model_arg"],
         messages=MESSAGES,
@@ -177,7 +176,6 @@ async def test_non_streaming_tool_call(client: openai.AsyncOpenAI, server_config
 @pytest.mark.asyncio
 async def test_streaming_tool_call(client: openai.AsyncOpenAI, server_config: ServerConfig):
     """Test tool call in streaming mode."""
-
     stream = await client.chat.completions.create(
         model=server_config["model_arg"],
         messages=MESSAGES,
@@ -222,7 +220,6 @@ async def test_streaming_tool_call(client: openai.AsyncOpenAI, server_config: Se
 @pytest.mark.asyncio
 async def test_non_streaming_product_tool_call(client: openai.AsyncOpenAI, server_config: ServerConfig):
     """Test tool call integer and boolean parameters in non-streaming mode."""
-
     response = await client.chat.completions.create(
         model=server_config["model_arg"],
         messages=PRODUCT_MESSAGES,
@@ -262,7 +259,6 @@ async def test_non_streaming_product_tool_call(client: openai.AsyncOpenAI, serve
 @pytest.mark.asyncio
 async def test_streaming_product_tool_call(client: openai.AsyncOpenAI, server_config: ServerConfig):
     """Test tool call integer and boolean parameters in streaming mode."""
-
     stream = await client.chat.completions.create(
         model=server_config["model_arg"],
         messages=PRODUCT_MESSAGES,

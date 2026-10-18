@@ -16,9 +16,9 @@ from prometheus_client import CollectorRegistry
 
 from aphrodite.entrypoints.launchers.api_server.entry import build_app
 from aphrodite.exceptions import (
-    APHRODITENotFoundError,
-    APHRODITEServerError,
-    APHRODITEValidationError,
+    AphroditeNotFoundError,
+    AphroditeServerError,
+    AphroditeValidationError,
 )
 
 
@@ -84,18 +84,18 @@ def app(registry):
 
     @app.get("/raise_aphrodite_validation_error")
     async def raise_aphrodite_validation_error():
-        raise APHRODITEValidationError("bad parameter", parameter="temperature")
+        raise AphroditeValidationError("bad parameter", parameter="temperature")
 
     @app.get("/raise_aphrodite_not_found_error")
     async def raise_aphrodite_not_found_error():
-        raise APHRODITENotFoundError("model not found")
+        raise AphroditeNotFoundError("model not found")
 
     @app.get("/raise_aphrodite_server_error")
     async def raise_aphrodite_server_error():
-        # Bare APHRODITEServerError goes through aphrodite_error_handler → 500.
+        # Bare AphroditeServerError goes through aphrodite_error_handler → 500.
         # EngineGenerateError / EngineDeadError are not used here: they call
         # terminate_if_errored and need engine/server state.
-        raise APHRODITEServerError("internal server failure")
+        raise AphroditeServerError("internal server failure")
 
     @app.get("/raise_value_error")
     async def raise_value_error():
@@ -164,9 +164,9 @@ def _get_http_requests_total(registry, method: str, handler: str):
         "HTTPException(400)->4xx",
         "HTTPException(404)->4xx",
         "RequestValidationError->4xx",
-        "APHRODITEValidationError->4xx",
-        "APHRODITENotFoundError->4xx",
-        "APHRODITEServerError->5xx",
+        "AphroditeValidationError->4xx",
+        "AphroditeNotFoundError->4xx",
+        "AphroditeServerError->5xx",
         "ValueError->4xx",
         "TypeError->4xx",
         "OverflowError->4xx",

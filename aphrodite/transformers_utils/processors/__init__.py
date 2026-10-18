@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Multi-modal processors may be defined in this directory for the following
+"""Multi-modal processors may be defined in this directory for the following
 reasons:
 
 - There is no processing file defined by HF Hub or Transformers library.
@@ -18,11 +17,8 @@ __all__ = [
     "FireRedASR2Processor",
     "FunASRProcessor",
     "GLM4VProcessor",
-    "Glm5NextProcessor",
-    "Granite4VisionProcessor",
     "H2OVLProcessor",
     "Moondream3Processor",
-    "InternVLProcessor",
     "IsaacProcessor",
     "KimiAudioProcessor",
     "KimiK25Processor",
@@ -42,11 +38,7 @@ __all__ = [
     "OpenVLAProcessor",
     "OvisProcessor",
     "Ovis2_5Processor",
-    "Qwen3ASRProcessor",
     "Step3VLProcessor",
-    "InklingProcessor",
-    "InklingImageProcessor",
-    "InklingAudioFeatureExtractor",
 ]
 
 _CLASS_TO_MODULE: dict[str, str] = {
@@ -57,10 +49,7 @@ _CLASS_TO_MODULE: dict[str, str] = {
     "FireRedASR2Processor": "aphrodite.transformers_utils.processors.fireredasr2",
     "FunASRProcessor": "aphrodite.transformers_utils.processors.funasr",
     "GLM4VProcessor": "aphrodite.transformers_utils.processors.glm4v",
-    "Glm5NextProcessor": "aphrodite.transformers_utils.processors.glm5next",
-    "Granite4VisionProcessor": "aphrodite.transformers_utils.processors.granite4_vision",
     "H2OVLProcessor": "aphrodite.transformers_utils.processors.h2ovl",
-    "InternVLProcessor": "aphrodite.transformers_utils.processors.internvl",
     "IsaacProcessor": "aphrodite.transformers_utils.processors.isaac",
     "KimiAudioProcessor": "aphrodite.transformers_utils.processors.kimi_audio",
     "KimiK25Processor": "aphrodite.transformers_utils.processors.kimi_k25",
@@ -81,11 +70,7 @@ _CLASS_TO_MODULE: dict[str, str] = {
     "OpenVLAProcessor": "aphrodite.transformers_utils.processors.openvla",
     "OvisProcessor": "aphrodite.transformers_utils.processors.ovis",
     "Ovis2_5Processor": "aphrodite.transformers_utils.processors.ovis2_5",
-    "Qwen3ASRProcessor": "aphrodite.transformers_utils.processors.qwen3_asr",
     "Step3VLProcessor": "aphrodite.transformers_utils.processors.step3_vl",
-    "InklingProcessor": "aphrodite.transformers_utils.processors.inkling",
-    "InklingImageProcessor": "aphrodite.transformers_utils.processors.inkling",
-    "InklingAudioFeatureExtractor": "aphrodite.transformers_utils.processors.inkling",
 }
 
 

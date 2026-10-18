@@ -11,8 +11,8 @@ ROCm port of ``nvidia/dspark.py``. Follows the same nvidia->amd recipe used for
     tilelang / triton / torch) instead of calling the tilelang kernels directly,
     and gate the trailing ``mhc_post`` on ``use_fused_mhc`` (True when AITER
     or TileLang fused MHC is available; False only on the torch fallback);
-  * drop the mega-MoE weight path (``make_deepseek_v4_expert_params_mapping`` /
-    ``use_mega_moe`` / ``finalize_mega_moe_weights`` do not exist in amd/model.py).
+  * use the AITER MegaMoE path (``aiter_mega_moe``) instead of the DeepGEMM
+    mega-MoE path.
 
 Everything else - the semi-autoregressive drafting hooks, the Markov head, the
 sliding-window context-KV insert, and the checkpoint ``mtp.*`` weight remap - is
@@ -26,10 +26,6 @@ import torch
 import torch.nn as nn
 
 from aphrodite.config import AphroditeConfig, get_current_aphrodite_config
-from aphrodite.distributed import (
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-)
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe import (
     fused_moe_make_expert_params_mapping,
@@ -44,10 +40,12 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
 )
 from aphrodite.model_executor.model_loader.weight_utils import default_weight_loader
 from aphrodite.model_executor.models.qwen3_dspark import (
+    DSparkConfidenceHead,
     DSparkMarkovHead,
 )
 from aphrodite.model_executor.models.utils import maybe_prefix
 
+from .mega_moe import finalize_mega_moe_weights
 from .model import DeepseekV4DecoderLayer
 
 logger = init_logger(__name__)
@@ -100,7 +98,7 @@ class DSparkDeepseekV4Model(nn.Module):
             ]
         )
 
-        # Heads: final norm + hc_head, and the Markov head
+        # Heads: final norm + hc_head, and the Markov + confidence heads
         # Loaded from the "final" MTP layer weights (mtp.*) in the target checkpoint
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         hc_dim = self.hc_mult * config.hidden_size
@@ -117,6 +115,12 @@ class DSparkDeepseekV4Model(nn.Module):
             config.dspark_markov_rank,
             prefix=maybe_prefix(prefix, "markov_head"),
         )
+        self.confidence_head: DSparkConfidenceHead | None = None
+        if getattr(config, "enable_confidence_head", True):
+            self.confidence_head = DSparkConfidenceHead(
+                config.hidden_size + config.dspark_markov_rank,
+                prefix=maybe_prefix(prefix, "confidence_head"),
+            )
 
         # MHC head CustomOp dispatcher (aiter / tilelang / triton / torch),
         # replacing the direct nvidia tilelang kernel call.
@@ -339,6 +343,15 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
     def markov_bias(self, markov_embed: torch.Tensor) -> torch.Tensor:
         return self.model.markov_head.bias(markov_embed, self.logits_processor)
 
+    def compute_confidence(self, head_hidden: torch.Tensor, markov_embed: torch.Tensor) -> torch.Tensor:
+        """Per-position acceptance probability for each drafted token."""
+        if self.model.confidence_head is None:
+            raise RuntimeError(
+                "compute_confidence() requires a confidence head, but the "
+                "checkpoint did not provide confidence_head weights."
+            )
+        return torch.sigmoid(self.model.confidence_head(head_hidden, markov_embed))
+
     # --- Weight loading ----------------------------------------------------
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -353,6 +366,7 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
             ckpt_down_proj_name="w2",
             ckpt_up_proj_name="w3",
             num_experts=self.config.n_routed_experts,
+            routed_experts_prefix=("" if self.model.layers[0].ffn.use_mega_moe else "routed_experts"),
         )
         expert_scale_suffix = (
             ".weight_scale" if getattr(self.config, "expert_dtype", "fp4") == "fp4" else ".weight_scale_inv"
@@ -368,18 +382,15 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-
-        tp_size = get_tensor_model_parallel_world_size()
-        tp_rank = get_tensor_model_parallel_rank()
-        n_local_head = self.config.num_attention_heads // tp_size
-        head_start = n_local_head * tp_rank
-        head_end = n_local_head * (tp_rank + 1)
+        loaded_confidence_head = False
 
         for name, loaded_weight in weights:
             mapped = self._remap_dspark_name(name)
             if mapped is None:
                 continue
             name = mapped
+            if "confidence_head." in name:
+                loaded_confidence_head = True
 
             # ``.scale`` -> per-method scale suffix.
             if name.endswith(".scale"):
@@ -409,8 +420,8 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
                 continue
 
             # Stacked rules only apply to decoder-layer weights. Head-stack params
-            # (main_proj/norm/hc_head/markov_head) load directly — otherwise e.g.
-            # "markov_w1" would collide with the "w1" shard rule.
+            # (main_proj/norm/hc_head/markov_head/confidence_head) load directly —
+            # otherwise e.g. "markov_w1" would collide with the "w1" shard rule.
             is_layer_param = name.startswith("model.layers.")
             for param_name, weight_name, stacked_shard_id in stacked_params_mapping:
                 if not is_layer_param or weight_name not in name:
@@ -421,11 +432,6 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
                 loaded_params.add(name)
                 break
             else:
-                if "attn_sink" in name:
-                    narrow = loaded_weight[head_start:head_end]
-                    params_dict[name][: narrow.shape[0]].copy_(narrow)
-                    loaded_params.add(name)
-                    continue
                 if ".shared_experts.w2" in name:
                     name = name.replace(".shared_experts.w2", ".shared_experts.down_proj")
                 if name.endswith(".ffn.gate.bias"):
@@ -434,8 +440,14 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
+
+        if self.model.confidence_head is not None and not loaded_confidence_head:
+            self.model.confidence_head = None
         logger.info_once("DSpark draft model loaded: %d params", len(loaded_params))
         return loaded_params
+
+    def process_weights_after_loading(self) -> None:
+        finalize_mega_moe_weights(self)
 
     def _remap_dspark_name(self, name: str) -> str | None:
         """Map a checkpoint ``mtp.{i}.*`` name to this model's parameter path.
@@ -447,8 +459,7 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
             return None
         stage = int(m.group(1))
         rest = m.group(2)
-        # The confidence head is not wired into inference yet; drop its weights.
-        if rest.startswith("confidence_head."):
+        if rest.startswith("confidence_head.") and self.model.confidence_head is None:
             return None
         # Head-stack params live at model level (mtp.last), context combiner at
         # model level (mtp.0); everything else is a per-layer decoder block.
@@ -458,6 +469,7 @@ class DSparkDeepseekV4ForCausalLM(nn.Module):
             "hc_head_base",
             "hc_head_scale",
             "markov_head.",
+            "confidence_head.",
         )
         if rest.startswith(("main_proj.", "main_norm.")) or rest.startswith(head_prefixes):
             return f"model.{rest}"

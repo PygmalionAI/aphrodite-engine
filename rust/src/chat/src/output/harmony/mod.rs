@@ -7,11 +7,11 @@
 //! `DecodedTextEvent` token IDs directly and lets the official `openai-harmony`
 //! parser recover the structured assistant message shape at token granularity.
 
+use aphrodite_text::output::{DecodedTextEvent, SampledDelta};
 use asynk_strim_attr::{TryYielder, try_stream};
 use futures::StreamExt as _;
 use openai_harmony::chat::{Content as HarmonyContent, Message as HarmonyMessage, Role};
 use openai_harmony::{HarmonyEncoding, StreamableParser};
-use aphrodite_text::output::{DecodedTextEvent, SampledDelta};
 
 use crate::Result as ChatResult;
 use crate::error::{Error, Result};
@@ -380,9 +380,10 @@ async fn harmony_assistant_event_stream(
                 if let Some(finished) = finished {
                     y.yield_ok(AssistantEvent::Done {
                         usage: finished.usage.into(),
+                        timestamps: finished.timestamps,
                         finish_reason: finished.finish_reason,
                         kv_transfer_params: finished.kv_transfer_params,
-                ec_transfer_params: finished.ec_transfer_params,
+                        ec_transfer_params: finished.ec_transfer_params,
                     })
                     .await;
                 }

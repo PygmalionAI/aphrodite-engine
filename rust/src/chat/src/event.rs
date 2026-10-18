@@ -4,9 +4,9 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-use aphrodite_llm::TokenUsage;
+use aphrodite_llm::{RequestTimestamps, TokenUsage};
 use aphrodite_text::{DecodedLogprobs, DecodedPromptLogprobs};
+use serde::{Deserialize, Serialize};
 
 use crate::FinishReason;
 
@@ -235,11 +235,15 @@ pub enum ChatEvent {
     Done {
         message: AssistantMessage,
         usage: ChatTokenUsage,
+        /// Engine lifecycle times used by frontend response metrics.
+        timestamps: RequestTimestamps,
         finish_reason: FinishReason,
         /// Connector-specific KV transfer parameters for disaggregated serving.
-        kv_transfer_params: Option<serde_json::Value>,
+        /// Boxed, like `ec_transfer_params`, to keep the per-token variants of
+        /// this enum small.
+        kv_transfer_params: Option<Box<serde_json::Value>>,
         /// Connector-specific encoder cache transfer parameters for
         /// disaggregated serving.
-        ec_transfer_params: Option<serde_json::Value>,
+        ec_transfer_params: Option<Box<serde_json::Value>>,
     },
 }

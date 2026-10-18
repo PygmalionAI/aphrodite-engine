@@ -6,8 +6,12 @@ from __future__ import annotations
 
 import torch
 
+from aphrodite.model_executor.layers.linear import UnquantizedLinearMethod
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
-from aphrodite.model_executor.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from aphrodite.model_executor.layers.vocab_parallel_embedding import (
+    UnquantizedEmbeddingMethod,
+    VocabParallelEmbedding,
+)
 
 
 class InklingLogitsProcessor(LogitsProcessor):
@@ -21,6 +25,7 @@ class InklingLogitsProcessor(LogitsProcessor):
         soft_cap: Optional logit soft cap (``None`` for the served checkpoint).
         logits_mup_width_multiplier: muP width divisor for the final logits;
             ``None`` or ``0`` disables it.
+
     """
 
     def __init__(
@@ -89,6 +94,17 @@ class InklingLogitsProcessor(LogitsProcessor):
         # soft cap, unit logits scale.
         assert self.soft_cap is None
         assert self.scale == 1.0
+        if self.logits_as_input:
+            return hidden_states / mup
+        if (
+            embedding_bias is not None
+            or (self.head_dtype is not None and self.head_dtype != hidden_states.dtype)
+            or not isinstance(lm_head.quant_method, (UnquantizedEmbeddingMethod, UnquantizedLinearMethod))
+        ):
+            # Quantized and precision-overridden heads must use the generic
+            # projection contract rather than treating packed weights as dense.
+            logits = self._get_logits(hidden_states, lm_head, embedding_bias, skip_gather)
+            return logits / mup if logits is not None else None
         w = lm_head.weight
         if self._logits_zero is None:
             self._logits_zero = w.new_zeros(1)

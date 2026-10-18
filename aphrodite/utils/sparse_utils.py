@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Safe deserialization helpers for client-supplied embedding tensors.
+"""Safe deserialization helpers for client-supplied embedding tensors.
 
 `check_sparse_tensor_invariants_threadsafe()` is a thread-safe wrapper for
 sparse tensor invariant validation. `safe_to_dense()` bounds the memory a
@@ -24,7 +23,7 @@ from collections.abc import Iterator
 import torch
 
 import aphrodite.envs as envs
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.utils.mem_constants import MiB_bytes
 
 _SPARSE_LOAD_LOCK = threading.Lock()
@@ -53,7 +52,7 @@ def safe_to_dense(tensor: object, *, parameter: str) -> torch.Tensor:
     `to_dense()` allocates anything.
     """
     if not isinstance(tensor, torch.Tensor):
-        raise APHRODITEValidationError(
+        raise AphroditeValidationError(
             f"`{parameter}` payload did not deserialize to a torch.Tensor.",
             parameter=parameter,
         )
@@ -62,7 +61,7 @@ def safe_to_dense(tensor: object, *, parameter: str) -> torch.Tensor:
     if max_bytes > 0:
         dense_bytes = tensor.numel() * tensor.element_size()
         if dense_bytes > max_bytes:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 f"`{parameter}` declares shape {tuple(tensor.shape)}, which "
                 f"would allocate {dense_bytes} bytes "
                 f"({dense_bytes / MiB_bytes:.0f} MiB) once densified, "

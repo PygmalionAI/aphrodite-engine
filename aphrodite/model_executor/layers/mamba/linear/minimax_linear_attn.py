@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
+from aphrodite.compilation.breakable_cudagraph import eager_break_during_capture
 from aphrodite.config import get_current_aphrodite_config
 from aphrodite.forward_context import ForwardContext, get_forward_context
 from aphrodite.model_executor.custom_op import PluggableLayer
@@ -295,6 +296,7 @@ class MiniMaxText01LinearAttention(LinearAttention):
         output[:num_actual_tokens], _ = self.out_proj(hidden)
 
 
+@eager_break_during_capture
 def linear_attention(
     hidden_states: torch.Tensor,
     output: torch.Tensor,
@@ -306,18 +308,8 @@ def linear_attention(
     self._forward(hidden_states=hidden_states, output=output, positions=positions)
 
 
-def linear_attention_fake(
-    hidden_states: torch.Tensor,
-    output: torch.Tensor,
-    positions: torch.Tensor,
-    layer_name: str,
-) -> None:
-    return
-
-
 direct_register_custom_op(
     op_name="linear_attention",
     op_func=linear_attention,
     mutates_args=["output"],
-    fake_impl=linear_attention_fake,
 )

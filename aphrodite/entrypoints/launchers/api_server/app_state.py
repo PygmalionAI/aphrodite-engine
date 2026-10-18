@@ -7,13 +7,15 @@ from typing import cast
 from starlette.datastructures import State
 
 from aphrodite.engine.protocol import EngineClient
-from aphrodite.entrypoints.chat_utils import load_chat_template
+from aphrodite.entrypoints.launchers.cli_args import resolve_default_chat_template_kwargs
+from aphrodite.entrypoints.mcp.tool_server import init_tool_server
 from aphrodite.entrypoints.openai.models.protocol import BaseModelPath
 from aphrodite.entrypoints.openai.models.serving import OpenAIServingModels
 from aphrodite.entrypoints.serve.tokenize.serving import ServingTokenization
 from aphrodite.entrypoints.serve.utils.api_utils import process_lora_modules
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
 from aphrodite.plugins.endpoint_plugins.interface import init_endpoint_plugins_state
+from aphrodite.renderers.chat_utils import load_chat_template
 from aphrodite.renderers.online_derenderer import OnlineDerenderer
 from aphrodite.renderers.online_renderer import OnlineRenderer
 from aphrodite.tasks import FALLBACK_SUPPORTED_TASKS, POOLING_TASKS, SupportedTask
@@ -59,6 +61,8 @@ async def init_app_state(
     state.aphrodite_config = aphrodite_config
     state.args = args
     resolved_chat_template = load_chat_template(args.chat_template)
+    default_chat_template_kwargs = resolve_default_chat_template_kwargs(args)
+    state.tool_server = await init_tool_server(args) if "generate" in supported_tasks else None
 
     # Merge default_mm_loras into the static lora_modules
     default_mm_loras = aphrodite_config.lora_config.default_mm_loras if aphrodite_config.lora_config is not None else {}
@@ -78,11 +82,13 @@ async def init_app_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
         trust_request_chat_template=args.trust_request_chat_template,
+        trust_request_mm_kwargs=args.trust_request_mm_kwargs,
         enable_auto_tools=args.enable_auto_tool_choice,
         exclude_tools_when_tool_choice_none=args.exclude_tools_when_tool_choice_none,
         tool_parser=args.tool_call_parser,
+        tool_strict_level=args.tool_strict_level,
         reasoning_parser=args.structured_outputs_config.reasoning_parser,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
+        default_chat_template_kwargs=default_chat_template_kwargs,
         log_error_stack=args.log_error_stack,
     )
     state.online_renderer.warmup()
@@ -97,8 +103,9 @@ async def init_app_state(
         enable_auto_tools=args.enable_auto_tool_choice,
         exclude_tools_when_tool_choice_none=args.exclude_tools_when_tool_choice_none,
         tool_parser=args.tool_call_parser,
+        tool_strict_level=args.tool_strict_level,
         reasoning_parser=args.structured_outputs_config.reasoning_parser,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
+        default_chat_template_kwargs=default_chat_template_kwargs,
         log_error_stack=args.log_error_stack,
     )
 
@@ -108,14 +115,21 @@ async def init_app_state(
         request_logger=request_logger,
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
-        default_chat_template_kwargs=args.default_chat_template_kwargs,
+        default_chat_template_kwargs=default_chat_template_kwargs,
         trust_request_chat_template=args.trust_request_chat_template,
     )
 
     if "generate" in supported_tasks:
         from aphrodite.entrypoints.generate.api_router import init_generate_state
 
-        await init_generate_state(engine_client, state, args, request_logger, supported_tasks)
+        await init_generate_state(
+            engine_client,
+            state,
+            args,
+            request_logger,
+            supported_tasks,
+            default_chat_template_kwargs,
+        )
 
         from aphrodite.entrypoints.scale_out.factories import init_scale_out_state
 
@@ -130,6 +144,19 @@ async def init_app_state(
         from aphrodite.entrypoints.pooling.factories import init_pooling_state
 
         init_pooling_state(engine_client, state, args, request_logger, supported_tasks)
+
+    from aphrodite.entrypoints.generate.structured_decisions.api_router import (
+        init_structured_decisions_state,
+    )
+
+    init_structured_decisions_state(
+        engine_client,
+        state,
+        args,
+        request_logger,
+        supported_tasks,
+        default_chat_template_kwargs,
+    )
 
     await init_endpoint_plugins_state(engine_client, state, args)
 

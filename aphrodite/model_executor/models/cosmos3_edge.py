@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
-from transformers import ProcessorMixin
+from transformers import NemotronHConfig, ProcessorMixin
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.model_executor.layers.layernorm import RMSNorm
@@ -20,7 +20,6 @@ from aphrodite.model_executor.models.module_mapping import MultiModelKeys
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.inputs import MultiModalFeatureSpec
 from aphrodite.sequence import IntermediateTensors
-from aphrodite.transformers_utils.configs.nemotron_h import NemotronHConfig
 from aphrodite.utils.torch_utils import async_tensor_h2d
 
 from .interfaces import (
@@ -147,8 +146,7 @@ def patch_merging_by_param(
 
 
 class Cosmos3EdgePatchMerger(nn.Module):
-    """
-    Projector: LayerNorm -> Linear -> GELU -> Linear
+    """Projector: LayerNorm -> Linear -> GELU -> Linear.
 
     Reads config from projector_config (not vision_config).
     input_hidden_size * spatial_merge_size² -> merger_intermediate_size
@@ -477,8 +475,7 @@ class Cosmos3EdgeForConditionalGeneration(
     SupportsPP,
     SupportsMRoPE,
 ):
-    """
-    Cosmos3 Edge model with a SigLIP2 vision encoder.
+    """Cosmos3 Edge model with a SigLIP2 vision encoder.
 
     Architecture:
         - self.visual: SigLIP2 encoder + patch merger + projector
@@ -562,7 +559,9 @@ class Cosmos3EdgeForConditionalGeneration(
 
         with self._mark_language_model(aphrodite_config):
             self.language_model = Cosmos3EdgeForCausalLM(
-                aphrodite_config=aphrodite_config,
+                aphrodite_config=aphrodite_config.with_hf_config(
+                    config.text_config, architectures=["NemotronHForCausalLM"]
+                ),
                 prefix=maybe_prefix(prefix, "language_model"),
             )
 

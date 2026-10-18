@@ -3,13 +3,13 @@
 
 use std::collections::HashMap;
 
+use aphrodite_chat::{ChatOptions, ChatRequest, ResolvedToolContext, SamplingParams};
+use aphrodite_text::output::TextDecodeOptions;
+use aphrodite_text::{Prompt, TextRequest};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use validator::{Validate, ValidationErrors};
-use aphrodite_chat::{ChatOptions, ChatRequest, ResolvedToolContext, SamplingParams};
-use aphrodite_text::output::TextDecodeOptions;
-use aphrodite_text::{Prompt, TextRequest};
 
 use crate::error::ApiError;
 use crate::routes::openai::chat_completions::convert::{
@@ -54,7 +54,9 @@ impl TokenizeCompletionRequest {
             add_special_tokens: self.add_special_tokens,
             data_parallel_rank: None,
             session_id: None,
-            reasoning_parser_kwargs: None,
+            kv_hints: None,
+            reasoning_parser_kwargs: Default::default(),
+            reasoning_ended: None,
             lora_request: None,
             arrival_time: None,
         }
@@ -169,8 +171,8 @@ impl Normalizable for DetokenizeRequest {}
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use aphrodite_chat::ChatTool;
+    use serde_json::json;
 
     use super::*;
     use crate::routes::openai::utils::types::{ChatMessage, MessageContent};
@@ -213,6 +215,7 @@ mod tests {
                     "properties": {"city": {"type": "string"}},
                 }),
                 strict: None,
+                defer_loading: None,
             }]
         );
     }

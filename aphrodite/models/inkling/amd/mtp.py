@@ -4,7 +4,7 @@
 
 Mirrors the reference ``mtp_model.py`` shipped with the checkpoint: each MTP
 depth ``i`` owns ``hidden_norm`` / ``embed_norm`` RMSNorms, an ``input_proj``
-(``2H -> H``) and a full Inkling transformer block (dense bf16 MLP, with the
+(``2H -> H``) and a full Inkling transformer block (dense MLP, with the
 same short convolutions as the backbone; its attention is full or sliding-window
 per depth, selected by ``mtp_config.local_layer_ids``). When enabled, a shared
 ``chain_norm`` is applied after every depth; its output is both the logits input
@@ -28,18 +28,23 @@ from torch import nn
 from aphrodite.config import AphroditeConfig
 from aphrodite.model_executor.layers.linear import ReplicatedLinear
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
+from aphrodite.model_executor.layers.quantization import QuantizationConfig
 from aphrodite.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from aphrodite.model_executor.model_loader.mtp_validation import (
     is_mtp_completeness_check_enabled,
 )
 from aphrodite.model_executor.model_loader.weight_utils import default_weight_loader
 from aphrodite.model_executor.models.interfaces import SupportsMultiModalEmbeddings
-from aphrodite.model_executor.models.utils import maybe_prefix
+from aphrodite.model_executor.models.utils import WeightsMapper, maybe_prefix
 from aphrodite.sequence import IntermediateTensors
 
 from ..configs import InklingModelConfig
 from .layernorm import InklingRMSNorm
-from .model import InklingDecoderLayer, InklingReplicatedEmbedding
+from .model import (
+    InklingDecoderLayer,
+    InklingReplicatedEmbedding,
+    _TmlForCausalLMBase,
+)
 from .ops.norm import embed_dual_rmsnorm_cat, embed_rmsnorm
 
 # Checkpoint attention projections (wq_du/wk_dv/wv_dv/wr_du) -> fused qkvr.
@@ -71,7 +76,13 @@ def _select_mtp_depth_count(n_predict: int, num_spec: int | None) -> int:
 class InklingMTPDepthLayer(nn.Module):
     """One MTP depth: norm both inputs, fuse (2H->H), run a Inkling block."""
 
-    def __init__(self, config: InklingModelConfig, prefix: str, is_local: bool) -> None:
+    def __init__(
+        self,
+        config: InklingModelConfig,
+        prefix: str,
+        is_local: bool,
+        quant_config: QuantizationConfig | None = None,
+    ) -> None:
         super().__init__()
         self.hidden_norm = InklingRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.embed_norm = InklingRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -80,16 +91,17 @@ class InklingMTPDepthLayer(nn.Module):
             config.hidden_size,
             bias=False,
             return_bias=False,
+            quant_config=quant_config,
             prefix=f"{prefix}.input_proj",
         )
-        # A force-dense-MLP bf16 block; ``is_local`` selects sliding-window vs
+        # A force-dense-MLP block; ``is_local`` selects sliding-window vs
         # full attention (the swa_* head config and sliding_window window) to
         # match this depth's checkpoint transformer_block weights.
         self.transformer_block = InklingDecoderLayer(
             config,
             layer_id=0,
             is_local=is_local,
-            quant_config=None,
+            quant_config=quant_config,
             prefix=f"{prefix}.transformer_block",
             force_dense_mlp=True,
         )
@@ -128,7 +140,12 @@ class InklingMultiTokenPredictor(nn.Module):
         # Keyed by depth index (str) to mirror the checkpoint layout.
         self.layers = nn.ModuleDict(
             {
-                str(idx): InklingMTPDepthLayer(config, f"{prefix}.layers.{idx}", idx in local_ids)
+                str(idx): InklingMTPDepthLayer(
+                    config,
+                    f"{prefix}.layers.{idx}",
+                    idx in local_ids,
+                    quant_config=aphrodite_config.quant_config,
+                )
                 for idx in range(self.num_mtp_layers)
             }
         )
@@ -228,6 +245,11 @@ class InklingMultiTokenPredictor(nn.Module):
 
 
 class InklingMTP(nn.Module, SupportsMultiModalEmbeddings):
+    hf_to_aphrodite_mapper = _TmlForCausalLMBase.hf_to_aphrodite_mapper | WeightsMapper(
+        orig_to_new_prefix={"model.mtp.": "model."},
+    )
+    packed_modules_mapping = _TmlForCausalLMBase.packed_modules_mapping
+
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = "") -> None:
         super().__init__()
         assert aphrodite_config.speculative_config is not None
@@ -304,7 +326,11 @@ class InklingMTP(nn.Module, SupportsMultiModalEmbeddings):
             logits = logits[..., : self.logits_processor.org_vocab_size]
         return logits
 
-    def get_top_tokens(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def get_top_tokens(
+        self,
+        hidden_states: torch.Tensor,
+        spec_step_idx: int = 0,
+    ) -> torch.Tensor:
         """Greedy draft tokens via rank-local argmax + tiny (value, index)
         reduction — no full-vocab logits all-gather. The muP divisor is a
         positive scalar, so the argmax is invariant and the scaling is
@@ -390,9 +416,9 @@ def _load_inkling_mtp_weights(
             continue
 
         # Dense MLP fused gate/up + down.
-        if ".mlp.w13_dn.weight" in name:
+        if ".mlp.w13_dn." in name:
             loaded_weight = _load(name.replace(".w13_dn.", ".gate_up_proj."), weight)
-        elif ".mlp.w2_md.weight" in name:
+        elif ".mlp.w2_md." in name:
             loaded_weight = _load(name.replace(".w2_md.", ".down_proj."), weight)
         else:
             if name.endswith(".bias") and name not in params:

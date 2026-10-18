@@ -32,9 +32,10 @@ from mistral_common.tokens.tokenizers.tekken import Tekkenizer
 from pydantic import ValidationError
 from transformers.tokenization_mistral_common import MistralCommonBackend
 
-from aphrodite.entrypoints.chat_utils import ChatCompletionMessageParam
 from aphrodite.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import ChatCompletionMessageParam
 from aphrodite.tokenizers.protocol import TokenizerLike
 
 if TYPE_CHECKING:
@@ -138,13 +139,17 @@ def _validate_apply_chat_template_args(
 
 def validate_request_params(request: "ChatCompletionRequest"):
     if request.chat_template is not None or request.chat_template_kwargs is not None:
-        raise ValueError("chat_template is not supported for Mistral tokenizers.")
+        raise AphroditeValidationError(
+            "chat_template is not supported for Mistral tokenizers.",
+            parameter="chat_template",
+        )
 
     if request.reasoning_effort and request.reasoning_effort not in list(ReasoningEffort):
-        raise ValueError(
+        raise AphroditeValidationError(
             f"reasoning_effort={request.reasoning_effort} is not supported by "
             "Mistral models. Supported values are: "
-            f"{[e.value for e in ReasoningEffort]}."
+            f"{[e.value for e in ReasoningEffort]}.",
+            parameter="reasoning_effort",
         )
 
 
@@ -161,14 +166,6 @@ def _tekken_token_to_id(tokenizer: "Tekkenizer", t: str | bytes) -> int:
             return tokenizer._special_tokens_reverse_vocab[t_str]
         logger.warning("Failed to convert token %s to id, replacing with <unk>", t_bytes)
         return tokenizer.unk_id
-
-
-def mistral_common_tekkenizer(tokenizer: object) -> "Tekkenizer | None":
-    """Return the underlying `Tekkenizer` for a `MistralCommonBackend`."""
-    mistral = getattr(tokenizer, "tokenizer", None)
-    instruct = getattr(mistral, "instruct_tokenizer", None)
-    tekken = getattr(instruct, "tokenizer", None)
-    return tekken if isinstance(tekken, Tekkenizer) else None
 
 
 def tekken_convert_ids_to_tokens(tokenizer: "Tekkenizer", ids: Sequence[int]) -> list[str | bytes]:
@@ -329,22 +326,13 @@ class MistralTokenizer(TokenizerLike):
         if text_pair is not None:
             raise ValueError("`text_pair` is not supported by `MistralTokenizer.__call__`.")
 
-        encoded = self.transformers_tokenizer(
+        return self.transformers_tokenizer(
             text=text,
             text_pair=text_pair,
             add_special_tokens=add_special_tokens,
             truncation=truncation,
             max_length=max_length,
         )
-        # TODO(juliendenize): once https://github.com/huggingface/transformers/pull/41962
-        # is in, revert to only call self.transformers_tokenizer(...).
-        # Hack to fix wrongly added eos token, when fix will be supported the condition
-        # below will be False even before the revert is done.
-        if encoded["input_ids"] and encoded["input_ids"][-1] == self.eos_token_id:
-            encoded["input_ids"].pop(-1)
-            if attention_mask := encoded.get("attention_mask"):
-                attention_mask.pop(-1)
-        return encoded
 
     @property
     def vocab(self) -> list[str]:
@@ -364,8 +352,10 @@ class MistralTokenizer(TokenizerLike):
         max_length: int | None = None,
         add_special_tokens: bool = True,
     ) -> list[int]:
-        # TODO(juliendenize): once https://github.com/huggingface/transformers/pull/41962
-        # is in, directly call self.transformers_tokenizer.encode(...).
+        # NOTE: transformers guards truncation with `if max_length and ...`, so
+        # `max_length=0` returns the full sequence instead of an empty one. Aphrodite
+        # treats `truncate_prompt_tokens=0` as an empty prompt, so keep slicing
+        # here until that is fixed upstream.
         encoded = self.tokenizer.encode(text, bos=add_special_tokens, eos=False)
 
         if truncation is not False and max_length is not None:
@@ -408,11 +398,6 @@ class MistralTokenizer(TokenizerLike):
         )
 
     def decode(self, ids: Sequence[int] | int, skip_special_tokens: bool = False) -> str:
-        # TODO(juliendenize): once https://github.com/huggingface/transformers/pull/41962
-        # is in, directly call self.transformers_tokenizer.decode(...).
-        if isinstance(ids, int):
-            ids = [ids]
-
         return self.transformers_tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)
 
     def batch_decode(self, ids: list[list[int]] | list[int], skip_special_tokens: bool = False) -> str:

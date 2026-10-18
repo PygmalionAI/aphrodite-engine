@@ -12,9 +12,10 @@ import torch
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.distributed import cleanup_dist_env_and_memory
-from aphrodite.entrypoints.chat_utils import ChatCompletionMessageParam
 from aphrodite.platforms import current_platform
-from aphrodite.utils.mem_utils import KiB_bytes, MiB_bytes, format_mib
+from aphrodite.renderers.chat_utils import ChatCompletionMessageParam
+from aphrodite.utils.mem_constants import KiB_bytes, MiB_bytes
+from aphrodite.utils.mem_utils import format_mib
 from tests.models.registry import HF_EXAMPLE_MODELS
 
 MODEL_NAME = "Qwen/Qwen3-VL-4B-Instruct"

@@ -7,8 +7,8 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use aphrodite_tokenizer::DynTokenizer;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::error::Result;
 

@@ -24,6 +24,14 @@ from aphrodite.v1.cudagraph_dispatcher import CudagraphDispatcher
 from tests.utils import create_new_process_for_each_test
 
 DEVICE_TYPE = current_platform.device_type
+HAS_DEVICE_GRAPH = current_platform.is_cuda() or current_platform.is_xpu()
+
+if current_platform.is_xpu():
+    from aphrodite.v1.worker.xpu_model_runner import _torch_cuda_wrapper
+
+    # Route torch.cuda graph/stream APIs to torch.xpu, as XPUModelRunner does.
+    with _torch_cuda_wrapper():
+        pass
 
 
 # Helper MLP for testing
@@ -50,6 +58,7 @@ def _create_aphrodite_config(
     mock_config.parallel_config = ParallelConfig()
     mock_config.speculative_config = None  # No speculative decoding
     mock_config.num_speculative_tokens = 0
+    mock_config.use_cumem_cudagraph_pool = False
     if not lora_config:
         mock_config.lora_config = None
     else:
@@ -161,7 +170,6 @@ class TestCudagraphDispatcher:
         assert key == BatchDescriptor(num_tokens=15)
 
         # 4. invalid_modes={FULL} should have a fall back mode
-        #    (e.g., cascade attention)
         desc_full_exact = BatchDescriptor(num_tokens=8, uniform=False)
         rt_mode, key = dispatcher.dispatch(
             num_tokens=8,
@@ -232,7 +240,7 @@ class TestCudagraphDispatcher:
     def test_get_capture_descs_empty_when_not_initialized(self):
         """Test that get_capture_descs returns empty list when keys not initialized."""
         comp_config = CompilationConfig(
-            cudagraph_mode="FULL",
+            cudagraph_mode=CUDAGraphMode.FULL,
             mode=CompilationMode.NONE,
             cudagraph_capture_sizes=[1, 8],
         )
@@ -243,7 +251,7 @@ class TestCudagraphDispatcher:
         assert dispatcher.get_capture_descs() == []
 
 
-@pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+@pytest.mark.skipif(not HAS_DEVICE_GRAPH, reason="Requires CUDA or XPU graph")
 class TestCUDAGraphWrapper:
     def setup_method(self):
         self.aphrodite_config = _create_aphrodite_config(CompilationConfig())
@@ -339,7 +347,6 @@ class TestCUDAGraphWrapper:
 
 def _run_and_monitor_call(wrapper, input_tensor, runtime_mode, batch_descriptor, aphrodite_config):
     """Helper to run a single call and monitor the action."""
-
     with (
         patch("torch.cuda.graph", wraps=torch.cuda.graph) as mock_graph_context,
         patch.object(wrapper, "runnable", wraps=wrapper.runnable) as mock_runnable,
@@ -377,11 +384,11 @@ def _run_and_monitor_call(wrapper, input_tensor, runtime_mode, batch_descriptor,
 
 
 @create_new_process_for_each_test("spawn")
-@pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+@pytest.mark.skipif(not HAS_DEVICE_GRAPH, reason="Requires CUDA or XPU graph")
 def test_capture_replay_bypass_logic():
     comp_config = CompilationConfig(
         mode=CompilationMode.APHRODITE_COMPILE,
-        cudagraph_mode="FULL",
+        cudagraph_mode=CUDAGraphMode.FULL,
         cudagraph_capture_sizes=[1, 2],
     )
     aphrodite_config = _create_aphrodite_config(comp_config)
@@ -440,12 +447,12 @@ def test_capture_replay_bypass_logic():
 
 
 @create_new_process_for_each_test("spawn")
-@pytest.mark.skipif(not current_platform.is_cuda(), reason="Skip if not cuda")
+@pytest.mark.skipif(not HAS_DEVICE_GRAPH, reason="Requires CUDA or XPU graph")
 def test_nested_wrappers():
     """Tests a scenario with a PIECEWISE wrapper inside a FULL one."""
     comp_config = CompilationConfig(
         mode=CompilationMode.APHRODITE_COMPILE,
-        cudagraph_mode="FULL",
+        cudagraph_mode=CUDAGraphMode.FULL,
         cudagraph_capture_sizes=[1],
     )
     aphrodite_config = _create_aphrodite_config(comp_config)

@@ -24,13 +24,14 @@ from aphrodite.distributed.kv_events import (
     MEDIUM_STORAGE,
     BlockRemoved,
     BlockStored,
-    KVCacheEvent,
+    KVCacheEventType,
 )
 from aphrodite.logger import init_logger
 from aphrodite.v1.core.kv_cache_utils import (
     BlockHash,
     maybe_convert_block_hash,
     resolve_block_hashes,
+    to_event_extra_keys,
 )
 from aphrodite.v1.kv_cache_interface import (
     KVCacheGroupSpec,
@@ -232,7 +233,7 @@ class OffloadingEventsTracker:
             meta.active_residencies.update(existing.active_residencies)
         self._pending_event_metadata[offload_key] = meta
 
-    def take_events(self, events: Iterable[OffloadingEvent]) -> Iterable[KVCacheEvent]:
+    def take_events(self, events: Iterable[OffloadingEvent]) -> Iterable[KVCacheEventType]:
         """Translate raw OffloadingEvents into self-describing KV events.
 
         Complete metadata is available only for full-attention groups when
@@ -242,12 +243,23 @@ class OffloadingEventsTracker:
         Yields:
             ``BlockStored`` or ``BlockRemoved`` events corresponding to
             the underlying :class:`OffloadingEvent` stream.
+
         """
+        removed_keys: set[OffloadKey] = set()
         for event in events:
             if event.removed:
+                if self.self_describing_enabled:
+                    removed_keys.update(event.keys)
                 yield from self._take_removed_event(event)
             else:
                 yield from self._take_stored_event(event)
+
+        # A primary removal can precede a queued secondary store in this batch.
+        # Keep its payload until all stores have registered their residencies.
+        for key in removed_keys:
+            meta = self._pending_event_metadata.get(key)
+            if meta is not None and not meta.active_residencies:
+                self._pending_event_metadata.pop(key)
 
     def reset(self) -> None:
         """Drop all tracked state; pending payloads are stale after a
@@ -337,7 +349,7 @@ class OffloadingEventsTracker:
             ownership=ownership,
         )
 
-    def _take_stored_event(self, event: OffloadingEvent) -> Iterable[KVCacheEvent]:
+    def _take_stored_event(self, event: OffloadingEvent) -> Iterable[BlockStored]:
         # Metadata is read, NOT popped: the entry must survive until the
         # eviction event so BlockRemoved can fan out to the same hashes.
         # Events are self-contained (own parent), so key order is free.
@@ -368,7 +380,7 @@ class OffloadingEventsTracker:
                 lora_id=meta.lora_id,
                 medium=_MEDIUM_TO_EVENT_STR[event.medium],
                 lora_name=meta.lora_name,
-                extra_keys=(list(meta.extra_keys) if meta.extra_keys is not None else None),
+                extra_keys=to_event_extra_keys(meta.extra_keys),
                 group_idx=meta.group_idx,
                 kv_cache_spec_kind=meta.kv_cache_spec.kv_cache_spec_kind,
                 kv_cache_spec_sliding_window=(meta.kv_cache_spec.kv_cache_spec_sliding_window),
@@ -376,7 +388,7 @@ class OffloadingEventsTracker:
                 ownership=event.ownership,
             )
 
-    def _take_removed_event(self, event: OffloadingEvent) -> Iterable[KVCacheEvent]:
+    def _take_removed_event(self, event: OffloadingEvent) -> Iterable[BlockRemoved]:
         # Keep group_idx unambiguous if a manager batch spans groups.
         locality = event.locality.value if event.locality is not None else None
         by_group: dict[int, list] = {}
@@ -386,8 +398,6 @@ class OffloadingEventsTracker:
                 group_idx = meta.group_idx
                 by_group.setdefault(group_idx, []).extend(maybe_convert_block_hash(h) for h in meta.block_hashes)
                 meta.active_residencies.discard((event.medium, event.ownership))
-                if not meta.active_residencies:
-                    self._pending_event_metadata.pop(key)
             else:
                 if self.self_describing_enabled:
                     logger.warning_once(

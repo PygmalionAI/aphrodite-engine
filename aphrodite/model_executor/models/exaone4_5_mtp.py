@@ -75,6 +75,7 @@ class Exaone4_5MultiTokenPredictor(ExaoneMoeMultiTokenPredictor):
         self.layers = nn.ModuleList(
             Exaone4DecoderLayer(
                 text_config,
+                cache_config=aphrodite_config.cache_config,
                 quant_config=quant_config,
                 prefix=f"{prefix}.layers.{idx}",
             )

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import ModelConfig
 from aphrodite.model_executor.models.config import (
@@ -23,8 +23,8 @@ from aphrodite.model_executor.models.config import (
 )
 
 
-def _model_config(hf_config: PretrainedConfig) -> ModelConfig:
-    """Return a minimal stand-in; the validator only reads hf_config."""
+def _model_config(hf_config: PreTrainedConfig) -> ModelConfig:
+    """Minimal stand-in for ModelConfig; only hf_config is read."""
     return cast(ModelConfig, SimpleNamespace(hf_config=hf_config))
 
 
@@ -41,7 +41,7 @@ def test_encoder_backbone_enables_bidirectional_attention():
     EncoderOnlyAttention; JinaEmbeddingsV5Model then dispatches to the encoder
     implementation.
     """
-    hf_config = PretrainedConfig(is_decoder=False)
+    hf_config = PreTrainedConfig(is_decoder=False)
 
     JinaEmbeddingsV5ModelConfig.verify_and_update_model_config(_model_config(hf_config))
 
@@ -49,9 +49,16 @@ def test_encoder_backbone_enables_bidirectional_attention():
 
 
 @pytest.mark.cpu_test
-def test_supported_decoder_backbone_is_accepted() -> None:
-    absent = PretrainedConfig()
+def test_supported_decoder_backbone_is_accepted():
+    """The Qwen3-based variants must keep loading.
+
+    `-small` omits `is_decoder` entirely, so an absent attribute has to be
+    treated as a decoder. The first assertion pins that assumption: if
+    PreTrainedConfig ever gains an `is_decoder=False` default, this fails here
+    rather than silently rejecting a supported checkpoint.
+    """
+    absent = PreTrainedConfig()
     assert not hasattr(absent, "is_decoder")
 
     JinaEmbeddingsV5ModelConfig.verify_and_update_model_config(_model_config(absent))
-    JinaEmbeddingsV5ModelConfig.verify_and_update_model_config(_model_config(PretrainedConfig(is_decoder=True)))
+    JinaEmbeddingsV5ModelConfig.verify_and_update_model_config(_model_config(PreTrainedConfig(is_decoder=True)))

@@ -3,15 +3,23 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
 
 from aphrodite.config.model import PROCESSED_LOGPROBS_MODES
 from aphrodite.logger import init_logger
+from aphrodite.model_executor.warmup.jit_warmup import WarmupChoices
+from aphrodite.model_executor.warmup.jit_warmup_triton_helper import (
+    DispatchSpec,
+    TritonWarmupTensor,
+    triton_kernel_dispatcher_with_warmup,
+)
 from aphrodite.triton_utils import tl, triton
+from aphrodite.utils.torch_utils import async_tensor_h2d
 from aphrodite.v1.outputs import LogprobsLists, LogprobsTensors, SamplerOutput
 from aphrodite.v1.sample.logits_processor.builtin import (
     MinPLogitsProcessor,
@@ -21,7 +29,7 @@ from aphrodite.v1.sample.metadata import SamplingMetadata
 from aphrodite.v1.sample.ops.bad_words import apply_bad_words_with_drafts
 from aphrodite.v1.sample.ops.penalties import apply_all_penalties
 from aphrodite.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p
-from aphrodite.v1.sample.sampler import Sampler
+from aphrodite.v1.sample.sampler import Sampler, has_custom_sampling_params
 from aphrodite.v1.spec_decode.metadata import SpecDecodeMetadata
 from aphrodite.v1.spec_decode.utils import unconditional_to_conditional_rates
 
@@ -38,8 +46,7 @@ MAX_SPEC_LEN = 128
 
 
 class RejectionSampler(nn.Module):
-    """
-    The implementation strictly follows the algorithm described in
+    """The implementation strictly follows the algorithm described in
         https://arxiv.org/abs/2211.17192.
     However, we want to clarify the terminology used in the implementation:
     accepted tokens: tokens that are accepted based on the relationship
@@ -85,6 +92,14 @@ class RejectionSampler(nn.Module):
                 device=device,
             )
         self.synthetic_mode = self.synthetic_conditional_rates is not None
+        _rejection_greedy_sample.register_warmup(synthetic_mode=self.synthetic_mode)
+        _rejection_random_sample.register_warmup(
+            synthetic_mode=self.synthetic_mode,
+        )
+        _expand.register_warmup()
+        _sample_recovered_tokens.register_warmup(
+            use_fp64_gumbel=self.use_fp64_gumbel,
+        )
 
     def forward(
         self,
@@ -95,8 +110,7 @@ class RejectionSampler(nn.Module):
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> SamplerOutput:
-        """
-        Args:
+        """Args:
             metadata:
                 Metadata for spec decoding.
             draft_probs (Optional[torch.Tensor]):
@@ -112,10 +126,12 @@ class RejectionSampler(nn.Module):
             sampling_metadata (aphrodite.v1.sample.metadata.SamplingMetadata):
                 Additional metadata needed for sampling, such as temperature,
                 top-k/top-p parameters, or other relevant information.
+
         Returns:
             SamplerOutput:
                 Contains the final output token IDs and their logprobs if
                 requested.
+
         """
         assert metadata.max_spec_len <= MAX_SPEC_LEN
 
@@ -128,11 +144,16 @@ class RejectionSampler(nn.Module):
         # won't affect the original logits tensor.
         assert logits is not None
         bonus_logits = logits[bonus_logits_indices]
+        bonus_persistent_data = sampling_metadata.persistent_data
+        if sampling_metadata.mirostat_mode is not None:
+            # Bonus sampling is provisional until verification accepts its row.
+            bonus_persistent_data = {index: data.copy() for index, data in bonus_persistent_data.items()}
         bonus_sampler_output = self.sampler(
             logits=bonus_logits,
             sampling_metadata=replace(
                 sampling_metadata,
                 max_num_logprobs=-1,
+                persistent_data=bonus_persistent_data,
             ),
             predict_bonus_token=True,
             # Override the logprobs mode to return logits because they are
@@ -153,15 +174,20 @@ class RejectionSampler(nn.Module):
             # the original raw logits for logprobs computation, since
             # apply_logits_processors modifies the tensor in-place.
             target_logits = target_logits.clone()
-        target_logits = self.apply_logits_processors(target_logits, sampling_metadata, metadata)
-        # [num_tokens, vocab_size]
-        # NOTE(woosuk): `target_logits` can be updated in place inside the
-        # `apply_sampling_constraints` function.
-        target_logits = apply_sampling_constraints(
-            target_logits,
-            metadata.cu_num_draft_tokens,
-            sampling_metadata,
-        )
+        if has_custom_sampling_params(sampling_metadata) and target_logits.shape[0] > 0:
+            # The ordered pipeline owns penalties when custom samplers are
+            # active; processors still enforce masks and thinking budgets first.
+            target_logits = self.apply_logits_processors(
+                target_logits, replace(sampling_metadata, no_penalties=True), metadata
+            )
+            target_logits = self._apply_custom_sampling_constraints(target_logits, sampling_metadata, metadata)
+        else:
+            target_logits = self.apply_logits_processors(target_logits, sampling_metadata, metadata)
+            target_logits = apply_sampling_constraints(
+                target_logits,
+                metadata.cu_num_draft_tokens,
+                sampling_metadata,
+            )
 
         output_token_ids = rejection_sample(
             metadata.draft_token_ids,
@@ -176,22 +202,66 @@ class RejectionSampler(nn.Module):
             synthetic_conditional_rates=self.synthetic_conditional_rates,
             use_fp64_gumbel=self.use_fp64_gumbel,
         )
+        self._commit_mirostat_state(logits, output_token_ids, sampling_metadata, metadata)
 
         logprobs_tensors = None
-        if sampling_metadata.max_num_logprobs is not None:
+        if sampling_metadata.max_num_logprobs is not None or sampling_metadata.logprob_token_ids:
             logprobs_tensors = self._get_logprobs_tensors(
-                sampling_metadata.max_num_logprobs,
+                sampling_metadata.max_num_logprobs or 0,
                 metadata,
                 logits,
                 target_logits if self.is_processed_logprobs_mode else raw_target_logits,
                 bonus_sampler_output.logprobs_tensors.logprobs,
                 output_token_ids,
+                sampling_metadata.logprob_token_ids,
             )
 
         return SamplerOutput(
             sampled_token_ids=output_token_ids,
             logprobs_tensors=logprobs_tensors,
         )
+
+    @staticmethod
+    def _commit_mirostat_state(
+        logits: torch.Tensor,
+        output_token_ids: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+        metadata: SpecDecodeMetadata,
+    ) -> None:
+        """Learn from emitted tokens, never from rejected provisional samples."""
+        modes = sampling_metadata.mirostat_mode
+        if modes is None:
+            return
+        taus = sampling_metadata.mirostat_tau
+        etas = sampling_metadata.mirostat_eta
+        assert taus is not None and etas is not None
+        outputs = output_token_ids.tolist()
+        target_start = 0
+        for index, (mode, count) in enumerate(zip(modes.tolist(), metadata.num_draft_tokens)):
+            target_end = target_start + count
+            if mode == 2:
+                tokens = outputs[index]
+                num_emitted = next((offset for offset, token in enumerate(tokens) if token < 0), len(tokens))
+                if num_emitted:
+                    # A rejection emits a recovered token at its target row.
+                    # Only a fully accepted draft sequence reaches the bonus.
+                    rows = torch.cat(
+                        (
+                            metadata.target_logits_indices[target_start:target_end],
+                            metadata.bonus_logits_indices[index : index + 1],
+                        )
+                    )[:num_emitted]
+                    raw_logits = logits[rows].float()
+                    selected = output_token_ids[index, :num_emitted].long().unsqueeze(-1)
+                    surprises = (raw_logits.logsumexp(dim=-1) - raw_logits.gather(-1, selected).squeeze(-1)) / math.log(
+                        2.0
+                    )
+                    tau = float(taus[index].item())
+                    eta = float(etas[index].item())
+                    state = sampling_metadata.persistent_data.setdefault(index, {})
+                    mu = state.get("miro_mu", 2 * tau)
+                    state["miro_mu"] = mu - eta * float((surprises - tau).sum().item())
+            target_start = target_end
 
     def _get_logprobs_tensors(
         self,
@@ -201,6 +271,7 @@ class RejectionSampler(nn.Module):
         target_logits: torch.Tensor,
         bonus_logits: torch.Tensor,
         sampled_token_ids: torch.Tensor,
+        logprob_token_ids: dict[int, list[int]] | None = None,
     ) -> LogprobsTensors:
         cu_num_sampled_tokens = torch.zeros_like(metadata.cu_num_sampled_tokens)
         cu_num_sampled_tokens[1:] = metadata.cu_num_sampled_tokens[:-1]
@@ -212,18 +283,33 @@ class RejectionSampler(nn.Module):
         final_logits[target_logits_indices] = target_logits.to(torch.float32)
         final_logits[bonus_logits_indices] = bonus_logits.to(torch.float32)
 
-        # Compute accepted token indices.
-        accepted_mask = sampled_token_ids != PLACEHOLDER_TOKEN_ID
-        num_accepted_tokens = accepted_mask.sum(dim=-1)
-        accepted_logit_indices = accepted_mask.nonzero(as_tuple=True)[1]
-        accepted_logit_indices += cu_num_sampled_tokens.repeat_interleave(num_accepted_tokens)
+        # Keep the fixed padded shape on device; parse_output filters invalid
+        # positions on CPU, avoiding dynamic nonzero shapes under CUDA graphs.
+        offsets = torch.arange(
+            sampled_token_ids.shape[-1],
+            device=cu_num_sampled_tokens.device,
+            dtype=cu_num_sampled_tokens.dtype,
+        )
+        accepted_logit_indices = (cu_num_sampled_tokens.unsqueeze(1) + offsets).flatten()
+        accepted_logit_indices.clamp_(max=final_logits.shape[0] - 1)
+        accepted_tokens = sampled_token_ids.flatten().clone()
+        accepted_tokens.masked_fill_(accepted_tokens == PLACEHOLDER_TOKEN_ID, 0)
 
         # Compute logprobs for accepted tokens.
         accepted_logits = final_logits[accepted_logit_indices]
         accepted_logprobs = (
             accepted_logits if self.is_logits_logprobs_mode else self.sampler.compute_logprobs(accepted_logits)
         )
-        accepted_tokens = sampled_token_ids[accepted_mask]
+        if logprob_token_ids:
+            width = sampled_token_ids.shape[-1]
+            expanded_ids = {
+                index * width + offset: ids for index, ids in logprob_token_ids.items() for offset in range(width)
+            }
+            specific = self.sampler.gather_specific_token_logprobs(
+                accepted_logprobs, expanded_ids, accepted_tokens.to(torch.int64)
+            )
+            assert specific is not None
+            return specific
         return self.sampler.gather_logprobs(
             accepted_logprobs,
             max_num_logprobs,
@@ -238,6 +324,7 @@ class RejectionSampler(nn.Module):
         logprobs_tensors: LogprobsTensors | None = None,
     ) -> tuple[list[list[int]], LogprobsLists | None]:
         """Parse the output of the rejection sampler.
+
         Args:
             output_token_ids: The sampled token IDs in shape
                 [batch_size, max_spec_len + 1]. The rejected tokens are
@@ -254,26 +341,73 @@ class RejectionSampler(nn.Module):
         output_token_ids_np = output_token_ids.cpu().numpy()
         # Create mask for valid tokens.
         valid_mask = (output_token_ids_np != PLACEHOLDER_TOKEN_ID) & (output_token_ids_np < vocab_size)
-        outputs = [row[valid_mask[i]].tolist() for i, row in enumerate(output_token_ids_np)]
-        cu_num_generated_tokens = [0]
-
-        invalid_set: set[int] = set()
         if invalid_req_indices is not None:
             if isinstance(invalid_req_indices, torch.Tensor):
-                invalid_set = {int(i) for i in invalid_req_indices.tolist()}
-            else:
-                invalid_set = {int(i) for i in invalid_req_indices}
-
-        for i in range(len(outputs)):
-            if i in invalid_set:
-                outputs[i].clear()
-            cu_num_generated_tokens.append(cu_num_generated_tokens[-1] + len(outputs[i]))
+                invalid_req_indices = invalid_req_indices.tolist()
+            if len(invalid_req_indices):
+                valid_mask[invalid_req_indices] = False
+        outputs = [row[valid_mask[i]].tolist() for i, row in enumerate(output_token_ids_np)]
+        cu_num_generated_tokens = [0] + valid_mask.sum(axis=1).cumsum().tolist()
 
         logprobs_lists = None
         if logprobs_tensors is not None:
-            logprobs_lists = logprobs_tensors.tolists(cu_num_generated_tokens=cu_num_generated_tokens)
+            filtered = logprobs_tensors.filter(torch.from_numpy(valid_mask.flatten()))
+            logprobs_lists = filtered.tolists(cu_num_generated_tokens=cu_num_generated_tokens)
 
         return outputs, logprobs_lists
+
+    def _apply_custom_sampling_constraints(
+        self,
+        logits: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+        metadata: SpecDecodeMetadata,
+    ) -> torch.Tensor:
+        """Evaluate every draft against the same ordered samplers as decode."""
+        indices = [index for index, count in enumerate(metadata.num_draft_tokens) for _ in range(count)]
+        expanded = self.sampler._subset_sampling_metadata(sampling_metadata, indices)
+        outputs = []
+        histories = []
+        for index, count in enumerate(metadata.num_draft_tokens):
+            committed = sampling_metadata.output_token_ids[index] if sampling_metadata.output_token_ids else []
+            drafts = sampling_metadata.spec_token_ids[index] if sampling_metadata.spec_token_ids else []
+            for position in range(count):
+                outputs.append([*committed, *drafts[:position]])
+                if sampling_metadata.token_history_ids_cpu is not None:
+                    history_lengths = sampling_metadata.token_history_lens_cpu
+                    assert history_lengths is not None
+                    length = int(history_lengths[index])
+                    history = sampling_metadata.token_history_ids_cpu[index, :length]
+                    if position:
+                        history = torch.cat((history, history.new_tensor(drafts[:position])))
+                    histories.append(history)
+        expanded.output_token_ids = outputs
+        expanded.spec_token_ids = None
+        expanded.output_token_ids_tensor = None
+        expanded.token_history_ids = None
+        expanded.token_history_lens = None
+        if histories:
+            expanded.token_history_ids_cpu = torch.nn.utils.rnn.pad_sequence(
+                histories, batch_first=True, padding_value=logits.shape[-1]
+            )
+            expanded.token_history_lens_cpu = torch.tensor([len(history) for history in histories], dtype=torch.int32)
+        logits = self.sampler._execute_samplers_in_order(logits, expanded)
+        min_p_processor = next(
+            (
+                processor
+                for processor in sampling_metadata.logitsprocs.argmax_invariant
+                if isinstance(processor, MinPLogitsProcessor)
+            ),
+            None,
+        )
+        if min_p_processor is not None and min_p_processor.min_p_count:
+            mapping = torch.tensor(indices, device=logits.device)
+            min_p = min_p_processor.min_p.squeeze(-1)[mapping]
+            probs = logits.softmax(dim=-1)
+            logits.masked_fill_(probs < probs.amax(dim=-1, keepdim=True) * min_p.unsqueeze(-1), float("-inf"))
+        if expanded.skew is not None:
+            probs = self.sampler.sampling_ops.apply_skew(logits.softmax(dim=-1), expanded)
+            logits = probs.clamp_min(torch.finfo(probs.dtype).tiny).log_()
+        return apply_top_k_top_p(logits, expanded.top_k, expanded.top_p)
 
     def apply_logits_processors(
         self,
@@ -299,7 +433,7 @@ class RejectionSampler(nn.Module):
             num_draft_tokens = torch.tensor(metadata.num_draft_tokens, device="cpu")
             original_indices = torch.arange(num_requests, device="cpu")
             repeat_indices_cpu = original_indices.repeat_interleave(num_draft_tokens)
-            repeat_indices = repeat_indices_cpu.to(device=logits.device, non_blocking=True)
+            repeat_indices = async_tensor_h2d(repeat_indices_cpu, logits.device)
             logits = self.apply_penalties(logits, sampling_metadata, metadata, repeat_indices, output_token_ids)
 
             # Apply allowed token ids.
@@ -431,7 +565,7 @@ def rejection_sample(
     if not sampling_metadata.all_random:
         # Rejection sampling for greedy sampling requests.
         target_argmax = target_logits.argmax(dim=-1)
-        rejection_greedy_sample_kernel[(batch_size,)](
+        _rejection_greedy_sample(
             output_token_ids,
             cu_num_draft_tokens,
             draft_token_ids,
@@ -441,7 +575,6 @@ def rejection_sample(
             max_spec_len,
             uniform_probs,
             synthetic_conditional_rates,
-            SYNTHETIC_MODE=synthetic_mode,
         )
         if sampling_metadata.all_greedy:
             return output_token_ids
@@ -466,7 +599,7 @@ def rejection_sample(
 
     # Rejection sampling for random sampling requests.
     assert uniform_probs is not None
-    rejection_random_sample_kernel[(batch_size,)](
+    _rejection_random_sample(
         output_token_ids,
         cu_num_draft_tokens,
         draft_token_ids,
@@ -477,10 +610,7 @@ def rejection_sample(
         uniform_probs,
         is_greedy,
         max_spec_len,
-        vocab_size,
         synthetic_conditional_rates,
-        NO_DRAFT_PROBS=draft_probs is None,
-        SYNTHETIC_MODE=synthetic_mode,
     )
     return output_token_ids
 
@@ -505,6 +635,7 @@ def apply_sampling_constraints(
     Returns:
         torch.Tensor: Processed logits if non-greedy sampling is used,
         otherwise returns the original logits.
+
     """
     assert logits.ndim == 2
     assert cu_num_draft_tokens.ndim == 1
@@ -584,19 +715,20 @@ def expand_batch_to_tokens(
             Value to be replaced if it is found in x.
         replace_to: int = 0
             Value to replace with when replace_from is found.
+
     Returns:
         expanded_x: [num_tokens] tensor.
+
     """
     batch_size = x.shape[0]
     assert cu_num_tokens.shape[0] == batch_size
     expanded_x = x.new_empty(num_tokens)
-    expand_kernel[(batch_size,)](
+    _expand(
         expanded_x,
         x,
         cu_num_tokens,
         replace_from,
         replace_to,
-        MAX_NUM_TOKENS=MAX_SPEC_LEN,  # To avoid recompilation.
     )
     return expanded_x
 
@@ -607,8 +739,7 @@ def generate_uniform_probs(
     generators: dict[int, torch.Generator],
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Generates a batch of uniform random samples, with optional seeding
+    """Generates a batch of uniform random samples, with optional seeding
     if available.
 
     This method creates a tensor of shape `(num_tokens, )` filled
@@ -627,10 +758,12 @@ def generate_uniform_probs(
             `torch.Generator` objects.
         device: torch.device
             The device on which to allocate the tensor.
+
     Returns:
         uniform_rand: torch.Tensor
             A tensor of shape `(num_tokens, )` containing uniform
             random values in the range [0, 1).
+
     """
     # NOTE(woosuk): We deliberately use float64 instead of float32 here
     # because when using float32, there's a non-negligible chance that
@@ -690,18 +823,14 @@ def sample_recovered_tokens(
     inv_q = q.reciprocal()
 
     recovered_token_ids = torch.empty_like(draft_token_ids)
-    BLOCK_SIZE = 8192
-    sample_recovered_tokens_kernel[(batch_size, max_spec_len)](
+    _sample_recovered_tokens(
         recovered_token_ids,
         cu_num_draft_tokens,
         draft_token_ids,
         draft_probs,
         target_probs,
         inv_q,
-        vocab_size,
-        BLOCK_SIZE,
-        NO_DRAFT_PROBS=draft_probs is None,
-        USE_FP64_GUMBEL=use_fp64_gumbel,
+        max_spec_len=max_spec_len,
     )
     return recovered_token_ids
 
@@ -763,6 +892,42 @@ def rejection_greedy_sample_kernel(
             output_token_ids_ptr + req_idx * (max_spec_len + 1) + num_draft_tokens,
             bonus_token_id,
         )
+
+
+def _rejection_greedy_sample_warmup_inputs(*, synthetic_mode: bool) -> dict[str, object]:
+    all_greedy = WarmupChoices(False, True)
+    int32 = TritonWarmupTensor(torch.int32)
+    return dict(
+        output_token_ids=int32,
+        cu_num_draft_tokens=int32,
+        draft_token_ids=int32,
+        target_argmax=TritonWarmupTensor(torch.int64),
+        bonus_token_ids=TritonWarmupTensor(torch.int64),
+        is_greedy=None if all_greedy else TritonWarmupTensor(torch.bool),
+        max_spec_len=5,
+        uniform_probs=(None if all_greedy and not synthetic_mode else TritonWarmupTensor(torch.float64)),
+        synthetic_conditional_rates=(TritonWarmupTensor(torch.float32) if synthetic_mode else None),
+    )
+
+
+@triton_kernel_dispatcher_with_warmup(
+    kernel=rejection_greedy_sample_kernel,
+    warmup_inputs=_rejection_greedy_sample_warmup_inputs,
+)
+def _rejection_greedy_sample(
+    output_token_ids: torch.Tensor,
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    target_argmax: torch.Tensor,
+    bonus_token_ids: torch.Tensor,
+    is_greedy: torch.Tensor | None,
+    max_spec_len: int,
+    uniform_probs: torch.Tensor | None,
+    synthetic_conditional_rates: torch.Tensor | None,
+) -> DispatchSpec:
+    return (output_token_ids.shape[0],), dict(
+        SYNTHETIC_MODE=synthetic_conditional_rates is not None,
+    )
 
 
 # NOTE(woosuk): Avoid specialization to prevent unnecessary recompilation.
@@ -833,6 +998,53 @@ def rejection_random_sample_kernel(
         )
 
 
+def _rejection_random_sample_warmup_inputs(*, synthetic_mode: bool) -> dict[str, object]:
+    vocab_size: Any = WarmupChoices(2, 16)
+    no_draft_probs = WarmupChoices(False, True)
+    int32 = TritonWarmupTensor(torch.int32)
+    probabilities = TritonWarmupTensor(
+        torch.float32,
+        shape=(1, vocab_size),
+    )
+    return dict(
+        output_token_ids=int32,
+        cu_num_draft_tokens=int32,
+        draft_token_ids=int32,
+        draft_probs=None if no_draft_probs else probabilities,
+        target_probs=probabilities,
+        bonus_token_ids=TritonWarmupTensor(torch.int64),
+        recovered_token_ids=int32,
+        uniform_probs=TritonWarmupTensor(torch.float64),
+        is_greedy=TritonWarmupTensor(torch.bool),
+        max_spec_len=5,
+        synthetic_conditional_rates=(TritonWarmupTensor(torch.float32) if synthetic_mode else None),
+    )
+
+
+@triton_kernel_dispatcher_with_warmup(
+    kernel=rejection_random_sample_kernel,
+    warmup_inputs=_rejection_random_sample_warmup_inputs,
+)
+def _rejection_random_sample(
+    output_token_ids: torch.Tensor,
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    draft_probs: torch.Tensor | None,
+    target_probs: torch.Tensor,
+    bonus_token_ids: torch.Tensor,
+    recovered_token_ids: torch.Tensor,
+    uniform_probs: torch.Tensor,
+    is_greedy: torch.Tensor,
+    max_spec_len: int,
+    synthetic_conditional_rates: torch.Tensor | None,
+) -> DispatchSpec:
+    return (output_token_ids.shape[0],), dict(
+        vocab_size=target_probs.shape[1],
+        NO_DRAFT_PROBS=draft_probs is None,
+        SYNTHETIC_MODE=synthetic_conditional_rates is not None,
+    )
+
+
 # NOTE(woosuk): Avoid specialization to prevent unnecessary recompilation.
 @triton.jit(do_not_specialize=["replace_from", "replace_to"])
 def expand_kernel(
@@ -855,6 +1067,29 @@ def expand_kernel(
     src_val = tl.where(src_val == replace_from, replace_to, src_val)
     offset = tl.arange(0, MAX_NUM_TOKENS)
     tl.store(output_ptr + start_idx + offset, src_val, mask=offset < num_tokens)
+
+
+def _expand_warmup_inputs() -> dict[str, object]:
+    dtype = WarmupChoices(torch.float32, torch.int32, torch.int64)
+    data = TritonWarmupTensor(dtype)
+    return dict(
+        output=data,
+        input=data,
+        cu_num_tokens=TritonWarmupTensor(torch.int32),
+        replace_from=0,
+        replace_to=0,
+    )
+
+
+@triton_kernel_dispatcher_with_warmup(kernel=expand_kernel, warmup_inputs=_expand_warmup_inputs)
+def _expand(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    cu_num_tokens: torch.Tensor,
+    replace_from: int,
+    replace_to: int,
+) -> DispatchSpec:
+    return (input.shape[0],), dict(MAX_NUM_TOKENS=MAX_SPEC_LEN)
 
 
 @triton.jit
@@ -939,3 +1174,47 @@ def sample_recovered_tokens_kernel(
 
     recovered_id = tl.minimum(recovered_id, vocab_size - 1)
     tl.store(output_token_ids_ptr + token_idx, recovered_id)
+
+
+def _sample_recovered_tokens_warmup_inputs(*, use_fp64_gumbel: bool) -> dict[str, object]:
+    vocab_size: Any = WarmupChoices(2, 16)
+    no_draft_probs = WarmupChoices(False, True)
+    int32 = TritonWarmupTensor(torch.int32)
+    probabilities = TritonWarmupTensor(
+        torch.float32,
+        shape=(1, vocab_size),
+    )
+    return dict(
+        output_token_ids=int32,
+        cu_num_draft_tokens=int32,
+        draft_token_ids=int32,
+        draft_probs=None if no_draft_probs else probabilities,
+        target_probs=probabilities,
+        inv_q=TritonWarmupTensor(
+            torch.float64 if use_fp64_gumbel else torch.float32,
+            shape=(1, vocab_size),
+        ),
+        max_spec_len=5,
+    )
+
+
+@triton_kernel_dispatcher_with_warmup(
+    kernel=sample_recovered_tokens_kernel,
+    warmup_inputs=_sample_recovered_tokens_warmup_inputs,
+)
+def _sample_recovered_tokens(
+    output_token_ids: torch.Tensor,
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    draft_probs: torch.Tensor | None,
+    target_probs: torch.Tensor,
+    inv_q: torch.Tensor,
+    *,
+    max_spec_len: int,
+) -> DispatchSpec:
+    return (cu_num_draft_tokens.shape[0], max_spec_len), dict(
+        vocab_size=target_probs.shape[1],
+        BLOCK_SIZE=8192,
+        NO_DRAFT_PROBS=draft_probs is None,
+        USE_FP64_GUMBEL=inv_q.dtype == torch.float64,
+    )

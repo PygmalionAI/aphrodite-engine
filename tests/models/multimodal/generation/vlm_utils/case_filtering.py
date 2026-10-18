@@ -144,6 +144,7 @@ def get_wrapped_test_sizes(test_info: VLMTestInfo, test_type: VLMTestType) -> tu
     Args:
         test_info: Test configuration to be expanded.
         test_type: The type of test being filtered for.
+
     """
     # If it is an embedding test, we always use the EMBEDDING_SIZE_FACTORS
     if test_type == VLMTestType.EMBEDDING:

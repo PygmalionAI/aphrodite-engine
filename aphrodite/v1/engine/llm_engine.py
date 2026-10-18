@@ -12,11 +12,16 @@ from typing_extensions import TypeVar
 
 import aphrodite.envs as envs
 from aphrodite.config import AphroditeConfig, ParallelConfig
+from aphrodite.config.profiler import (
+    validate_profile_iteration_bounds,
+    validate_profile_prefix,
+)
 from aphrodite.distributed import stateless_destroy_torch_distributed_process_group
 from aphrodite.distributed.parallel_state import get_dp_group
 from aphrodite.engine.arg_utils import EngineArgs
+from aphrodite.exceptions import ProfilerAlreadyActiveError
 from aphrodite.inputs import EngineInput, PromptType
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_if_needed, init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from aphrodite.outputs import PoolingRequestOutput, RequestOutput
@@ -34,6 +39,7 @@ from aphrodite.v1.engine.input_processor import InputProcessor
 from aphrodite.v1.engine.output_processor import OutputProcessor
 from aphrodite.v1.engine.parallel_sampling import ParentRequest
 from aphrodite.v1.executor import Executor
+from aphrodite.v1.kv_hints import KvHintsEnvelope
 from aphrodite.v1.metrics.loggers import StatLoggerFactory, StatLoggerManager
 from aphrodite.v1.metrics.reader import Metric, get_metrics_snapshot
 from aphrodite.v1.metrics.stats import IterationStats
@@ -59,6 +65,7 @@ class LLMEngine:
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
         multiprocess_mode: bool = False,
     ) -> None:
+        configure_logging_if_needed(aphrodite_config.logging_config)
         self.aphrodite_config = aphrodite_config
         self.model_config = aphrodite_config.model_config
         self.observability_config = aphrodite_config.observability_config
@@ -107,6 +114,7 @@ class LLMEngine:
             log_stats=self.log_stats,
             renderer=renderer,
         )
+        self._profile_session_active = False
 
         self.logger_manager: StatLoggerManager | None = None
         if self.log_stats:
@@ -162,7 +170,6 @@ class LLMEngine:
         enable_multiprocessing: bool = False,
     ) -> "LLMEngine":
         """Creates an LLM engine from the engine arguments."""
-
         # Create the engine configs.
         aphrodite_config = engine_args.create_engine_config(usage_context)
         executor_class = Executor.get_class(aphrodite_config)
@@ -205,7 +212,6 @@ class LLMEngine:
 
     def abort_request(self, request_ids: list[str], internal: bool = False) -> None:
         """Remove request_ids from EngineCore and Detokenizer."""
-
         request_ids = self.output_processor.abort_requests(request_ids, internal)
         self.engine_core.abort_requests(request_ids)
 
@@ -221,6 +227,7 @@ class LLMEngine:
         priority: int = 0,
         session_id: str | None = None,
         prompt_text: str | None = None,
+        kv_hints: KvHintsEnvelope | None = None,
     ) -> str:
         # Validate the request_id type.
         if not isinstance(request_id, str):
@@ -242,6 +249,13 @@ class LLMEngine:
                     "does not match the EngineCoreRequest.request_id attribute. The "
                     "latter will be used, and the former will be ignored."
                 )
+            request_params = request.params
+            if isinstance(request_params, SamplingParams):
+                # This request object is owned by the engine from here on.
+                self.input_processor.apply_watermarking(
+                    request_params,
+                    self.input_processor.resolve_watermarking(request_params),
+                )
         else:
             request = self.input_processor.process_inputs(
                 request_id,
@@ -254,6 +268,7 @@ class LLMEngine:
                 trace_headers=trace_headers,
                 priority=priority,
                 session_id=session_id,
+                kv_hints=kv_hints,
             )
             prompt_text, _, _ = extract_prompt_components(self.model_config, prompt)
 
@@ -305,7 +320,16 @@ class LLMEngine:
                 outputs.outputs,
                 engine_core_timestamp=outputs.timestamp,
                 iteration_stats=iteration_stats,
+                weight_version=outputs.weight_version,
             )
+
+            mm_processor_cache = self.renderer.mm_processor_cache
+            if mm_processor_cache is not None:
+                for engine_core_output in outputs.outputs:
+                    if engine_core_output.mm_cache_miss_hashes:
+                        for mm_hash in engine_core_output.mm_cache_miss_hashes:
+                            mm_processor_cache.invalidate(mm_hash)
+
             self.output_processor.update_scheduler_stats(outputs.scheduler_stats)
 
         # 3) Abort any reqs that finished due to stop strings.
@@ -326,11 +350,33 @@ class LLMEngine:
 
         return processed_outputs.request_outputs
 
-    def start_profile(self, profile_prefix: str | None = None):
-        self.engine_core.profile(True, profile_prefix)
+    def start_profile(
+        self,
+        profile_prefix: str | None = None,
+        *,
+        delay_iterations: int | None = None,
+        max_iterations: int | None = None,
+    ):
+        if self._profile_session_active:
+            raise ProfilerAlreadyActiveError()
+        validate_profile_prefix(profile_prefix)
+        validate_profile_iteration_bounds(delay_iterations, max_iterations)
+
+        self._profile_session_active = True
+        try:
+            self.engine_core.profile(
+                True,
+                profile_prefix,
+                delay_iterations,
+                max_iterations,
+            )
+        except BaseException:
+            self._profile_session_active = False
+            raise
 
     def stop_profile(self):
         self.engine_core.profile(False)
+        self._profile_session_active = False
 
     def reset_mm_cache(self):
         # Join the background MM warmup first: the mm_processor_cache is not
@@ -358,11 +404,20 @@ class LLMEngine:
         if self.logger_manager is not None:
             self.logger_manager.record_sleep_state(1, level)
 
-    def wake_up(self, tags: list[str] | None = None):
-        self.engine_core.wake_up(tags)
+    def release_kv_cache_memory(self) -> None:
+        self.renderer.clear_mm_cache()
+        self.engine_core.release_kv_cache_memory()
 
         if self.logger_manager is not None:
+            self.logger_manager.record_sleep_state(1, 0)
+
+    def wake_up(self, tags: list[str] | None = None) -> bool:
+        fully_awake = self.engine_core.wake_up(tags)
+
+        if self.logger_manager is not None and fully_awake:
             self.logger_manager.record_sleep_state(0, 0)
+
+        return fully_awake
 
     def is_sleeping(self) -> bool:
         return self.engine_core.is_sleeping()

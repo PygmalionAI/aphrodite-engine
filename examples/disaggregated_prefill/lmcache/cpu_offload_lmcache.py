@@ -29,12 +29,12 @@ import os
 import time
 from dataclasses import asdict
 
-from aphrodite.engine.args_tools import EngineArgs
 from lmcache.v1.cache_engine import LMCacheEngineBuilder
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.config import KVTransferConfig
 from aphrodite.distributed.kv_transfer.kv_connector.v1.lmcache_integration.aphrodite_v1_adapter import ENGINE_NAME
+from aphrodite.engine.arg_utils import EngineArgs
 
 
 def setup_environment_variables(aphrodite_version: str):

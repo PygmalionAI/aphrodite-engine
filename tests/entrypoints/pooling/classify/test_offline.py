@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from aphrodite import LLM, ClassificationRequestOutput, PoolingParams
+from aphrodite.inputs import PromptType
 from aphrodite.tasks import PoolingTask
 from tests.models.utils import softmax
 
@@ -53,7 +54,8 @@ def test_token_ids_prompts(llm: LLM):
 
 @pytest.mark.skip_global_cleanup
 def test_list_prompts(llm: LLM):
-    outputs = llm.classify([prompt, prompt_token_ids], use_tqdm=False)
+    prompts: list[PromptType] = [prompt, prompt_token_ids]
+    outputs = llm.classify(prompts, use_tqdm=False)
     assert len(outputs) == 2
     for i in range(len(outputs)):
         assert isinstance(outputs[i], ClassificationRequestOutput)

@@ -2,10 +2,10 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 use anyhow::{Context, Result};
+use aphrodite_mock_engine::Opt;
 use clap::Parser as _;
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
-use aphrodite_mock_engine::Opt;
 
 fn init_tracing() {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();

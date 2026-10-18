@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use thiserror_ext::AsReport as _;
@@ -22,6 +23,8 @@ pub enum ApiError {
     ModelNotFound { model: String },
     /// The request body could not be parsed as valid JSON.
     JsonParseError { message: String },
+    /// The requested operation conflicts with current server state.
+    Conflict { message: String },
     /// An unexpected internal failure happened before streaming started.
     ServerError { message: String },
 }
@@ -32,6 +35,7 @@ impl ApiError {
         match self {
             Self::InvalidRequest { .. } => StatusCode::BAD_REQUEST,
             Self::ModelNotFound { .. } => StatusCode::NOT_FOUND,
+            Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::ServerError { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::JsonParseError { .. } => StatusCode::BAD_REQUEST,
         }
@@ -65,9 +69,21 @@ impl ApiError {
                 param: None,
                 code: Some("json_parse_error".to_string()),
             },
+            Self::Conflict { message } => ErrorDetail {
+                message: message.clone(),
+                error_type: "conflict_error".to_string(),
+                param: None,
+                code: Some("conflict_error".to_string()),
+            },
         };
 
         ErrorResponse { error }
+    }
+}
+
+impl From<JsonRejection> for ApiError {
+    fn from(error: JsonRejection) -> Self {
+        Self::json_parse_error(error.body_text())
     }
 }
 
@@ -171,6 +187,46 @@ mod tests {
     }
 
     #[test]
+    fn invalid_reasoning_parameters_map_to_invalid_request() {
+        for error in [
+            aphrodite_chat::Error::InvalidReasoningEffort(
+                "DeepSeek V4.1 reasoning_effort must be within [1, 100]".to_string(),
+            ),
+            aphrodite_chat::Error::InvalidReasoningControl {
+                message: "template kwarg `thinking` must be a boolean".to_string(),
+            },
+        ] {
+            let api_error = chat_submit_error("failed to submit chat request", error);
+            assert_eq!(api_error.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                api_error.to_error_response().error.error_type,
+                "invalid_request_error"
+            );
+        }
+    }
+
+    #[test]
+    fn chat_template_throw_maps_to_invalid_request() {
+        let error = aphrodite_chat::Error::ChatTemplateThrown {
+            message: "Unexpected reasoning effort high.".to_string(),
+        };
+        let api_error = chat_submit_error("failed to submit chat request", error);
+        assert_eq!(api_error.status_code(), StatusCode::BAD_REQUEST);
+        let response = api_error.to_error_response();
+        assert_eq!(response.error.error_type, "invalid_request_error");
+        assert_eq!(response.error.message, "Unexpected reasoning effort high.");
+    }
+
+    #[test]
+    fn chat_template_render_failure_stays_internal() {
+        let error = aphrodite_chat::Error::ChatTemplate(
+            "failed to render jinja template: unknown function".to_string(),
+        );
+        let api_error = chat_submit_error("failed to submit chat request", error);
+        assert_eq!(api_error.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
     fn llm_wrapped_empty_prompt_maps_to_invalid_request() {
         let error = aphrodite_text::Error::Llm(aphrodite_llm::Error::EmptyPromptTokenIds {
             request_id: "req-1".to_string(),
@@ -219,7 +275,8 @@ mod tests {
 
     #[test]
     fn empty_allowed_token_ids_maps_to_invalid_request() {
-        let error = aphrodite_text::Error::TokenIds(aphrodite_text::TokenIdsError::EmptyAllowedTokenIds);
+        let error =
+            aphrodite_text::Error::TokenIds(aphrodite_text::TokenIdsError::EmptyAllowedTokenIds);
         let api_error = text_submit_error("failed to submit completion request", error);
         assert_eq!(api_error.status_code(), StatusCode::BAD_REQUEST);
         let response = api_error.to_error_response();

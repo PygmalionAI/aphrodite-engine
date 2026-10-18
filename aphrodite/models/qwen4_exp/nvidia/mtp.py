@@ -18,10 +18,12 @@ from collections.abc import Iterable
 import regex as re
 import torch
 from torch import nn
+from transformers import Qwen4ExpTextConfig
 
-from aphrodite.compilation.decorators import support_torch_compile
+from aphrodite import envs
 from aphrodite.config import AphroditeConfig, replace, set_current_aphrodite_config
 from aphrodite.distributed import get_pp_group
+from aphrodite.forward_context import get_forward_context, is_forward_context_available
 from aphrodite.model_executor.layers.fused_moe.utils import (
     is_model_fused_shared_expert_compatible,
 )
@@ -33,7 +35,7 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from aphrodite.model_executor.model_loader.utils import configure_quant_config
-from aphrodite.model_executor.models.interfaces import SupportsPP
+from aphrodite.model_executor.models.interfaces import SupportsHCSP, SupportsPP
 from aphrodite.model_executor.models.qwen3_5 import Qwen3_5Model
 from aphrodite.model_executor.models.utils import (
     AutoWeightsLoader,
@@ -44,11 +46,14 @@ from aphrodite.model_executor.models.utils import (
     maybe_fuse_shared_experts,
     maybe_prefix,
 )
-from aphrodite.sequence import IntermediateTensors
-from aphrodite.transformers_utils.configs.qwen4_exp import (
-    Qwen4ExpTextConfig,
+from aphrodite.models.common.ops.sequence_parallel import (
+    sp_all_gather,
+    sp_padding_mask,
+    sp_shard,
 )
+from aphrodite.sequence import IntermediateTensors
 
+from ..common.hyperconnection import is_hc_sequence_parallel_enabled
 from .hyperconnection import GatedResidual, HyperConnectionConfig
 from .low_latency_gemm import enable_qwen4_exp_low_latency_gemm
 from .model import (
@@ -78,9 +83,19 @@ def _remap_ignored_layers(
     return remapped
 
 
+def _remap_quantized_layers(
+    quantized_layers: dict[str, dict],
+    mtp_start_layer_idx: int,
+) -> dict[str, dict]:
+    """Map checkpoint MTP layer indices to standalone draft indices."""
+    return {
+        _remap_ignored_layers([name], mtp_start_layer_idx)[0]: layer_info
+        for name, layer_info in quantized_layers.items()
+    }
+
+
 def _remap_mtp_weight_name(name: str) -> str | None:
     """Map Qwen4Exp checkpoint paths into the standalone draft model."""
-
     for checkpoint_prefix in (
         "model.language_model.",
         "language_model.",
@@ -136,6 +151,13 @@ def _make_draft_aphrodite_config(
                 "exclude_modules",
                 _remap_ignored_layers(exclude_modules, mtp_start_layer_idx),
             )
+        quantized_layers = getattr(draft_quant_config, "quantized_layers", None)
+        if quantized_layers:
+            setattr(  # noqa: B010
+                draft_quant_config,
+                "quantized_layers",
+                _remap_quantized_layers(quantized_layers, mtp_start_layer_idx),
+            )
 
     draft_aphrodite_config = replace(
         aphrodite_config,
@@ -147,15 +169,6 @@ def _make_draft_aphrodite_config(
     return draft_aphrodite_config
 
 
-@support_torch_compile(
-    dynamic_arg_dims={
-        "input_ids": 0,
-        "positions": -1,
-        "intermediate_tensors": 0,
-        "inputs_embeds": 0,
-        "hidden_states": 0,
-    }
-)
 class Qwen4ExpMultiTokenPredictor(nn.Module):
     hf_to_aphrodite_mapper = Qwen3_5Model.hf_to_aphrodite_mapper | _EXTRA_WEIGHTS_MAPPER
 
@@ -166,6 +179,9 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
         config: Qwen4ExpTextConfig = model_config.hf_text_config
 
         self.config = config
+        # MoE SP also enables HC SP, while HC SP can be enabled independently.
+        self.use_hc_sequence_parallel = is_hc_sequence_parallel_enabled(aphrodite_config)
+        self.use_sequence_parallel = aphrodite_config.parallel_config.use_sequence_parallel_moe
         self.vocab_size = config.vocab_size
 
         self.mtp_start_layer_idx = config.num_hidden_layers
@@ -205,7 +221,7 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
             self.layers = nn.ModuleList(
                 Qwen4ExpDecoderLayer(
                     draft_aphrodite_config,
-                    layer_type="full_attention",
+                    layer_type="qwen_sparse_attention",
                     prefix=f"{prefix}.layers.{self.mtp_start_layer_idx + idx}",
                 )
                 for idx in range(self.num_mtp_layers)
@@ -238,7 +254,6 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
 
     def _iter_qsa_attentions(self):
         """Yield MTP attention modules that own a QSA indexer."""
-
         for layer in self.layers:
             attention = getattr(layer, "self_attn", None)
             if attention is not None and getattr(attention, "indexer", None) is not None:
@@ -246,13 +261,11 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
 
     def set_skip_topk(self, skip: bool) -> None:
         """Select on MTP step 0 and reuse its QSA indices on later steps."""
-
         for attention in self._iter_qsa_attentions():
             attention.indexer.skip_topk = skip
 
     def compact_topk_indices(self, row_indices: torch.Tensor) -> None:
         """Keep each request's target-aligned step-0 sparse-index row."""
-
         num_rows = row_indices.numel()
         for attention in self._iter_qsa_attentions():
             buffer = attention.topk_indices_buffer
@@ -299,6 +312,16 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
 
         current_step_idx = spec_step_idx % self.num_mtp_layers
+        full_num_tokens = positions.shape[-1]
+        if self.use_hc_sequence_parallel:
+            # SP requires PP=1, so the first-rank branch sets prev_block_output.
+            assert prev_block_output is not None
+            if self.use_sequence_parallel and envs.APHRODITE_MOE_SKIP_PADDING and is_forward_context_available():
+                forward_context = get_forward_context()
+                forward_context.is_padding = sp_padding_mask(forward_context.is_padding, hidden_states)
+            hidden_states = sp_shard(hidden_states)
+            # The FC output is already complete and needs only a slice.
+            prev_block_output = sp_shard(prev_block_output)
         layer = self.layers[current_step_idx]
         hidden_states, block_output, injection = layer(
             hidden_states=hidden_states,
@@ -322,6 +345,15 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
         multi_hidden, sample_hidden_states, _ = self.hyper_connection_mixer.combine_and_mix(
             hidden_states, block_output, injection
         )
+        if self.use_hc_sequence_parallel:
+            # Gather both outputs together, then restore their contiguous layouts.
+            packed_hidden_states = torch.cat([sample_hidden_states, multi_hidden], dim=-1)
+            packed_hidden_states = sp_all_gather(packed_hidden_states)[:full_num_tokens]
+            sample_hidden_states, multi_hidden = packed_hidden_states.split(
+                [hidden_size, hc_count * hidden_size], dim=-1
+            )
+            sample_hidden_states = sample_hidden_states.contiguous()
+            multi_hidden = multi_hidden.contiguous()
         return sample_hidden_states, multi_hidden
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -342,16 +374,7 @@ class Qwen4ExpMultiTokenPredictor(nn.Module):
         return loader.load_weights(weights, mapper=mapper)
 
 
-@support_torch_compile(
-    dynamic_arg_dims={
-        "input_ids": 0,
-        "positions": -1,
-        "intermediate_tensors": 0,
-        "inputs_embeds": 0,
-        "hidden_states": 0,
-    }
-)
-class Qwen4ExpMTP(nn.Module, SupportsPP, Qwen4ExpMixtureOfExperts):
+class Qwen4ExpMTP(nn.Module, SupportsHCSP, SupportsPP, Qwen4ExpMixtureOfExperts):
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
         "gate_up_proj": ["gate_proj", "up_proj"],
@@ -367,13 +390,6 @@ class Qwen4ExpMTP(nn.Module, SupportsPP, Qwen4ExpMixtureOfExperts):
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = "") -> None:
         config: Qwen4ExpTextConfig = aphrodite_config.model_config.hf_text_config
         self.aphrodite_config = aphrodite_config
-        cache_config = aphrodite_config.cache_config
-        if cache_config.mamba_cache_mode == "all":
-            raise NotImplementedError(
-                "Qwen4ExpMTP currently does not support 'all' prefix caching, "
-                "please use '--mamba-cache-mode=align' instead"
-            )
-
         self.quant_config = aphrodite_config.quant_config
 
         super().__init__()

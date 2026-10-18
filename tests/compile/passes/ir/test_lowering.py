@@ -11,6 +11,7 @@ from aphrodite.compilation.passes.ir.lowering_pass import (
 )
 from aphrodite.config import get_current_aphrodite_config
 from aphrodite.ir import ops
+from aphrodite.model_executor.layers.activation import GeluAndMulSparse
 from aphrodite.platforms import current_platform
 
 from ...backend import TestBackend
@@ -32,6 +33,15 @@ class Model(nn.Module):
         # dispatch to native due to variance_size parameter
         x6 = ops.rms_norm(x5, self.weight, 1e-5, self.hidden_size // 2)
         return x6 + 3.0
+
+
+class SparseActivationModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.activation = GeluAndMulSparse(0.95, "tanh")
+
+    def forward(self, x):
+        return self.activation(x)
 
 
 @pytest.mark.parametrize("rms_provider", ops.rms_norm.supported_providers())
@@ -65,3 +75,25 @@ def test_lowering_rms_norm(rms_provider, default_aphrodite_config):
 
     torch.testing.assert_close(output_unlowered, output)
     torch.testing.assert_close(output_unlowered, output2)
+
+
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="CUDA-only provider")
+def test_lowering_gelu_and_mul_sparse(default_aphrodite_config):
+    torch.set_default_device("cuda")
+    lowering_pass = AphroditeIRLoweringPass(get_current_aphrodite_config())
+    backend = TestBackend(lowering_pass)
+    model = SparseActivationModel()
+    x = torch.randn(8, 32768, dtype=torch.bfloat16)
+
+    with (
+        ops.gelu_and_mul_sparse.set_priority(["triton", "native"]),
+        ir.enable_torch_wrap(True),
+    ):
+        compiled_model = torch.compile(model, backend=backend, fullgraph=True)
+        output = compiled_model(x)
+
+    selected = lowering_pass.selected_impls["gelu_and_mul_sparse"]
+    assert selected == {"gelu_and_mul_sparse": "triton"}
+
+    expected = ops.gelu_and_mul_sparse.impls["native"].impl_fn(x, 1.6448536269514722, "tanh")
+    torch.testing.assert_close(output, expected, rtol=1.6e-2, atol=1e-3)

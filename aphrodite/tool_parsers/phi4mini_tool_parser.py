@@ -8,7 +8,6 @@ from typing import Any
 import regex as re
 from transformers import PreTrainedTokenizerBase
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaMessage,
     ExtractedToolCallInformation,
@@ -19,6 +18,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
 )
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
     ToolParser,
@@ -28,8 +28,7 @@ logger = init_logger(__name__)
 
 
 class Phi4MiniJsonToolParser(ToolParser):
-    """
-    Tool call parser for phi-4-mini models intended for use with the
+    """Tool call parser for phi-4-mini models intended for use with the
     examples/tool_chat_template_llama.jinja template.
 
     Used when --enable-auto-tool-choice --tool-call-parser phi4_mini_json
@@ -51,9 +50,7 @@ class Phi4MiniJsonToolParser(ToolParser):
         self.bot_token: str = "functools"
 
     def extract_tool_calls(self, model_output: str, request: ChatCompletionRequest) -> ExtractedToolCallInformation:
-        """
-        Extract the tool calls from a complete model response.
-        """
+        """Extract the tool calls from a complete model response."""
         logger.debug("Model output: %s", model_output)
 
         pattern = r"functools\[(.*?)\]"

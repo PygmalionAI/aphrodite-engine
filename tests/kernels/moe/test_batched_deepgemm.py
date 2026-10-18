@@ -32,7 +32,6 @@ BLOCK_SIZE = [128, 128]
 @pytest.mark.parametrize("topk", [2, 4])
 def test_batched_deepgemm_vs_triton(E: int, T: int, K: int, N: int, topk: int, monkeypatch, workspace_init):
     """Compare BatchedDeepGemmExperts to BatchedTritonExperts."""
-
     monkeypatch.setenv("APHRODITE_USE_DEEP_GEMM", "1")
 
     device = "cuda"

@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
 import argparse
 from typing import Any, TypedDict
 
 import ray
 import torch
-from aphrodite.modeling.layers.fused_moe.fused_moe import *
-from aphrodite.modeling.layers.fused_moe.moe_permute_unpermute import (
-    _moe_permute,
-    _moe_unpermute_and_reduce,
+from transformers import AutoConfig
+
+from aphrodite.model_executor.layers.fused_moe import fused_topk
+from aphrodite.model_executor.layers.fused_moe.moe_permute_unpermute import (
+    MoEPermuteScratch,
     moe_permute,
     moe_unpermute,
 )
-from aphrodite.modeling.layers.fused_moe.utils import _fp8_quantize
-from transformers import AutoConfig
-
+from aphrodite.model_executor.layers.fused_moe.utils import _fp8_quantize
 from aphrodite.platforms import current_platform
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
 
@@ -39,74 +39,61 @@ def benchmark_permute(
     use_fp8_w8a8: bool,
     use_int8_w8a16: bool,
     num_iters: int = 100,
-    use_customized_permute: bool = False,
 ) -> float:
     # init_dtype = torch.float16 if use_fp8_w8a8 else dtype
     hidden_states = torch.randn(num_tokens, hidden_size, dtype=dtype)
     # output_hidden_states = torch.empty_like(hidden_states)
     if use_fp8_w8a8:
-        align_block_size = 128  # deepgemm needs 128 m aligned block
         qhidden_states, scale = _fp8_quantize(hidden_states, None, None)
     else:
-        align_block_size = None
         qhidden_states = hidden_states
 
     gating_output = torch.randn(num_iters, num_tokens, num_experts, dtype=torch.float32)
 
     input_gating = torch.randn(num_tokens, num_experts, dtype=torch.float32)
     topk_weights, topk_ids, token_expert_indices = fused_topk(qhidden_states, input_gating, topk, False)
+    scratch = MoEPermuteScratch(
+        num_experts=num_experts,
+        num_local_experts=num_experts,
+        device=qhidden_states.device,
+    )
 
     def prepare(i: int):
         input_gating.copy_(gating_output[i])
 
     def run():
-        if use_customized_permute:
-            (
-                permuted_hidden_states,
-                a1q_scale,
-                first_token_off,
-                inv_perm_idx,
-                m_indices,
-            ) = moe_permute(
-                qhidden_states,
-                a1q_scale=None,
-                topk_ids=topk_ids,
-                n_expert=num_experts,
-                expert_map=None,
-                align_block_size=align_block_size,
-            )
-        else:
-            (
-                permuted_hidden_states,
-                a1q_scale,
-                sorted_token_ids,
-                expert_ids,
-                inv_perm,
-            ) = _moe_permute(qhidden_states, None, topk_ids, num_experts, None, align_block_size)
+        moe_permute(
+            qhidden_states,
+            a1q_scale=None,
+            topk_ids=topk_ids,
+            n_expert=num_experts,
+            expert_map=None,
+            scratch=scratch,
+        )
 
     # JIT compilation & warmup
     run()
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     # Capture 10 invocations with CUDA graph
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         for _ in range(10):
             run()
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     # Warmup
     for _ in range(5):
         graph.replay()
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = torch.Event(enable_timing=True)
+    end_event = torch.Event(enable_timing=True)
 
     latencies: list[float] = []
     for i in range(num_iters):
         prepare(i)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         start_event.record()
         graph.replay()
@@ -127,117 +114,79 @@ def benchmark_unpermute(
     use_fp8_w8a8: bool,
     use_int8_w8a16: bool,
     num_iters: int = 100,
-    use_customized_permute: bool = False,
 ) -> float:
     # init_dtype = torch.float16 if use_fp8_w8a8 else dtype
     hidden_states = torch.randn(num_tokens, hidden_size, dtype=dtype)
-    output_hidden_states = torch.empty_like(hidden_states)
     if use_fp8_w8a8:
-        align_block_size = 128  # deepgemm needs 128 m aligned block
         qhidden_states, scale = _fp8_quantize(hidden_states, None, None)
     else:
-        align_block_size = None
         qhidden_states = hidden_states
 
     input_gating = torch.randn(num_tokens, num_experts, dtype=torch.float32)
 
     topk_weights, topk_ids, token_expert_indices = fused_topk(qhidden_states, input_gating, topk, False)
+    scratch = MoEPermuteScratch(
+        num_experts=num_experts,
+        num_local_experts=num_experts,
+        device=qhidden_states.device,
+    )
 
     def prepare():
-        if use_customized_permute:
-            (
-                permuted_hidden_states,
-                a1q_scale,
-                first_token_off,
-                inv_perm_idx,
-                m_indices,
-            ) = moe_permute(
-                qhidden_states,
-                a1q_scale=None,
-                topk_ids=topk_ids,
-                n_expert=num_experts,
-                expert_map=None,
-                align_block_size=align_block_size,
-            )
-            # convert to fp16/bf16 as gemm output
-            return (
-                permuted_hidden_states.to(dtype),
-                first_token_off,
-                inv_perm_idx,
-                m_indices,
-            )
-        else:
-            (
-                permuted_qhidden_states,
-                a1q_scale,
-                sorted_token_ids,
-                expert_ids,
-                inv_perm,
-            ) = _moe_permute(qhidden_states, None, topk_ids, num_experts, None, align_block_size)
-            # convert to fp16/bf16 as gemm output
-            return (
-                permuted_qhidden_states.to(dtype),
-                a1q_scale,
-                sorted_token_ids,
-                expert_ids,
-                inv_perm,
-            )
+        (
+            permuted_hidden_states,
+            _,
+            first_token_off,
+            inv_perm_idx,
+            _,
+        ) = moe_permute(
+            qhidden_states,
+            a1q_scale=None,
+            topk_ids=topk_ids,
+            n_expert=num_experts,
+            expert_map=None,
+            scratch=scratch,
+        )
+        # convert to fp16/bf16 as gemm output
+        return (
+            permuted_hidden_states.to(dtype),
+            first_token_off,
+            inv_perm_idx,
+        )
 
     def run(input: tuple):
-        if use_customized_permute:
-            (
-                permuted_hidden_states,
-                first_token_off,
-                inv_perm_idx,
-                m_indices,
-            ) = input
-            output = torch.empty_like(hidden_states)
-            moe_unpermute(
-                output,
-                permuted_hidden_states,
-                topk_weights,
-                inv_perm_idx,
-                first_token_off,
-            )
-        else:
-            (
-                permuted_hidden_states,
-                a1q_scale,
-                sorted_token_ids,
-                expert_ids,
-                inv_perm,
-            ) = input
-            _moe_unpermute_and_reduce(
-                output_hidden_states,
-                permuted_hidden_states,
-                inv_perm,
-                topk_weights,
-                True,
-            )
+        (permuted_hidden_states, first_token_off, inv_perm_idx) = input
+        output = torch.empty_like(hidden_states)
+        moe_unpermute(
+            output,
+            permuted_hidden_states,
+            topk_weights,
+            inv_perm_idx,
+            first_token_off,
+        )
 
     # JIT compilation & warmup
     input = prepare()
     run(input)
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     # Capture 10 invocations with CUDA graph
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
         for _ in range(10):
             run(input)
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
     # Warmup
     for _ in range(5):
         graph.replay()
-    torch.cuda.synchronize()
+    torch.accelerator.synchronize()
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = torch.Event(enable_timing=True)
+    end_event = torch.Event(enable_timing=True)
 
     latencies: list[float] = []
     for i in range(num_iters):
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         start_event.record()
         graph.replay()
         end_event.record()
@@ -268,8 +217,7 @@ class BenchmarkWorker:
         dtype: torch.dtype,
         use_fp8_w8a8: bool,
         use_int8_w8a16: bool,
-        use_customized_permute: bool = False,
-    ) -> tuple[dict[str, int], float]:
+    ) -> tuple[float, float]:
         current_platform.seed_everything(self.seed)
 
         permute_time = benchmark_permute(
@@ -281,7 +229,6 @@ class BenchmarkWorker:
             use_fp8_w8a8,
             use_int8_w8a16,
             num_iters=100,
-            use_customized_permute=use_customized_permute,
         )
         unpermute_time = benchmark_unpermute(
             num_tokens,
@@ -292,7 +239,6 @@ class BenchmarkWorker:
             use_fp8_w8a8,
             use_int8_w8a16,
             num_iters=100,
-            use_customized_permute=use_customized_permute,
         )
         return permute_time, unpermute_time
 
@@ -318,6 +264,7 @@ def main(args: argparse.Namespace):
         config.architectures[0] == "DeepseekV3ForCausalLM"
         or config.architectures[0] == "DeepseekV2ForCausalLM"
         or config.architectures[0] == "Glm4MoeForCausalLM"
+        or config.architectures[0] == "Glm4MoeLiteForCausalLM"
     ):
         E = config.n_routed_experts
         topk = config.num_experts_per_tok
@@ -336,7 +283,6 @@ def main(args: argparse.Namespace):
     dtype = torch.float16 if current_platform.is_rocm() else config.dtype
     use_fp8_w8a8 = args.dtype == "fp8_w8a8"
     use_int8_w8a16 = args.dtype == "int8_w8a16"
-    use_customized_permute = args.use_customized_permute
 
     if args.batch_size is None:
         batch_sizes = [
@@ -388,7 +334,6 @@ def main(args: argparse.Namespace):
                 dtype,
                 use_fp8_w8a8,
                 use_int8_w8a16,
-                use_customized_permute,
             )
             for batch_size in batch_sizes
         ],
@@ -404,7 +349,6 @@ if __name__ == "__main__":
     parser = FlexibleArgumentParser()
     parser.add_argument("--model", type=str, default="mistralai/Mixtral-8x7B-Instruct-v0.1")
     parser.add_argument("--dtype", type=str, choices=["auto", "fp8_w8a8", "int8_w8a16"], default="auto")
-    parser.add_argument("--use-customized-permute", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--batch-size", type=int, required=False)
     parser.add_argument("--trust-remote-code", action="store_true")

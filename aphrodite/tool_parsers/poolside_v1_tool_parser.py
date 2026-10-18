@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-GLM-4 Tool Call Parser with incremental string streaming support.
+"""GLM-4 Tool Call Parser with incremental string streaming support.
 
 This parser fixes the streaming issue reported in Issue #32829 where long string
 parameters (e.g., file content with 4000+ characters of code) are buffered until
@@ -17,10 +16,9 @@ from typing import Any
 
 import partial_json_parser.core.complete
 import regex as re
-from openai.types.responses import ToolChoiceFunction
+from openai.types.responses import ToolChoiceCustom, ToolChoiceFunction
 from partial_json_parser.core.options import Allow
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -37,6 +35,7 @@ from aphrodite.entrypoints.openai.responses.protocol import (
     ResponsesRequest,
 )
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import (
     Tool,
@@ -164,7 +163,14 @@ class PoolsideV1ToolParser(ToolParser):
         """
         if request.tools:
             tc = request.tool_choice
-            if tc == "required" or isinstance(tc, (ChatCompletionNamedToolChoiceParam, ToolChoiceFunction)):
+            if tc == "required" or isinstance(
+                tc,
+                (
+                    ChatCompletionNamedToolChoiceParam,
+                    ToolChoiceFunction,
+                    ToolChoiceCustom,
+                ),
+            ):
                 request.skip_special_tokens = False
                 return request
         request = super().adjust_request(request)

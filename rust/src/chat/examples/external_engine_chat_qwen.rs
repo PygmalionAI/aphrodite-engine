@@ -4,9 +4,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clap::Parser;
-use futures::StreamExt as _;
-use tracing_subscriber::EnvFilter;
 use aphrodite_chat::{
     AssistantBlockKind, AssistantMessageExt as _, ChatEvent, ChatLlm, ChatMessage, ChatRequest,
     ChatRole, SamplingParams, load_model_backends,
@@ -14,6 +11,9 @@ use aphrodite_chat::{
 use aphrodite_engine_core_client::{EngineCoreClient, EngineCoreClientConfig, TransportMode};
 use aphrodite_llm::Llm;
 use aphrodite_text::TextLlm;
+use clap::Parser;
+use futures::StreamExt as _;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
 #[command(about = "Smoke-test the Rust chat facade against an external Qwen Aphrodite engine.")]
@@ -70,6 +70,7 @@ async fn main() -> Result<()> {
         coordinator_mode: None,
         model_name: args.model.clone(),
         client_index: CLIENT_INDEX,
+        engine_stats_enabled: true,
     })
     .await
     .context("failed to connect to external Aphrodite engine")?;

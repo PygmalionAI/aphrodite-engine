@@ -13,6 +13,12 @@ request models whose before-validators were missing the same guard.
 import pytest
 from pydantic import ValidationError
 
+from aphrodite.entrypoints.generate.generative_scoring.serving import (
+    GenerativeScoringRequest,
+)
+from aphrodite.entrypoints.generate.structured_decisions.protocol import (
+    StructuredDecisionRequest,
+)
 from aphrodite.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from aphrodite.entrypoints.openai.completion.protocol import CompletionRequest
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
@@ -23,11 +29,12 @@ from aphrodite.entrypoints.scale_out.token_in_token_out.protocol import Generate
 from aphrodite.entrypoints.serve.tokenize.protocol import TokenizeChatRequest
 from aphrodite.entrypoints.speech_to_text.transcription.protocol import TranscriptionRequest
 from aphrodite.entrypoints.speech_to_text.translation.protocol import TranslationRequest
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 pytestmark = pytest.mark.skip_global_cleanup
 
 REQUEST_MODELS = [
+    GenerativeScoringRequest,
     CompletionRequest,
     ResponsesRequest,
     EmbeddingChatRequest,
@@ -57,12 +64,12 @@ def test_request_models_reject_non_object_body(request_model, payload):
 
 def test_completion_request_still_validates_dict_bodies():
     """The guard must not swallow real field-level errors on object bodies."""
-    with pytest.raises(APHRODITEValidationError, match="prompt"):
+    with pytest.raises(AphroditeValidationError, match="prompt"):
         CompletionRequest.model_validate({"model": "qwen", "prompt": ""})
 
 
 def test_tokenize_chat_request_still_validates_dict_bodies():
-    with pytest.raises(APHRODITEValidationError, match="add_generation_prompt"):
+    with pytest.raises(AphroditeValidationError, match="add_generation_prompt"):
         TokenizeChatRequest.model_validate(
             {
                 "model": "qwen",
@@ -74,6 +81,26 @@ def test_tokenize_chat_request_still_validates_dict_bodies():
 
 
 CACHE_SALT_MODELS = [
+    (
+        GenerativeScoringRequest,
+        {
+            "query": "Is this city the capital of France?",
+            "items": ["Paris"],
+            "label_token_ids": [9454, 2753],
+        },
+    ),
+    (
+        StructuredDecisionRequest,
+        {
+            "state": "hello",
+            "questions": {
+                "lang": {
+                    "type": "choice",
+                    "criteria": {"English": "Text written in English."},
+                }
+            },
+        },
+    ),
     (CompletionRequest, {"prompt": "hello"}),
     (ChatCompletionRequest, {"messages": [{"role": "user", "content": "hello"}]}),
     (ResponsesRequest, {"input": "hello"}),
@@ -87,12 +114,12 @@ CACHE_SALT_MODELS = [
     ids=[m.__name__ for m, _ in CACHE_SALT_MODELS],
 )
 def test_request_models_reject_forbidden_cache_salt(request_model, payload):
-    with pytest.raises(APHRODITEValidationError, match="cache_salt"):
+    with pytest.raises(AphroditeValidationError, match="cache_salt"):
         request_model.model_validate({**payload, "cache_salt": "/"})
 
 
 def test_request_models_reject_overlong_cache_salt():
-    with pytest.raises(APHRODITEValidationError, match="cache_salt"):
+    with pytest.raises(AphroditeValidationError, match="cache_salt"):
         CompletionRequest.model_validate({"prompt": "hello", "cache_salt": "a" * 129})
 
 

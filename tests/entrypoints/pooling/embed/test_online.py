@@ -20,9 +20,13 @@ from aphrodite.entrypoints.pooling.utils import (
     decode_pooling_output,
 )
 from aphrodite.platforms import current_platform
+from aphrodite.renderers.chat_utils import ChatCompletionMessageParam
 from aphrodite.tokenizers import get_tokenizer
 from aphrodite.utils.serial_utils import EMBED_DTYPES, ENDIANNESS, binary2tensor
-from tests.models.language.pooling.embed_utils import run_embedding_correctness_test
+from tests.models.language.pooling.embed_utils import (
+    float_embeddings,
+    run_embedding_correctness_test,
+)
 from tests.models.utils import check_embeddings_close
 from tests.utils import RemoteOpenAIServer
 
@@ -139,7 +143,7 @@ async def test_completion_request(client: openai.AsyncOpenAI, model_name: str, h
     assert embeddings.usage.prompt_tokens == len(input_tokens)
     assert embeddings.usage.total_tokens == len(input_tokens)
 
-    aphrodite_outputs = [d.embedding for d in embeddings.data]
+    aphrodite_outputs = float_embeddings(embeddings)
     run_embedding_correctness_test(hf_model, [input_text], aphrodite_outputs)
 
     # test input: list[int]
@@ -157,7 +161,7 @@ async def test_completion_request(client: openai.AsyncOpenAI, model_name: str, h
     assert embeddings.usage.prompt_tokens == len(input_tokens)
     assert embeddings.usage.total_tokens == len(input_tokens)
 
-    aphrodite_outputs = [d.embedding for d in embeddings.data]
+    aphrodite_outputs = float_embeddings(embeddings)
     run_embedding_correctness_test(hf_model, [input_text], aphrodite_outputs)
 
 
@@ -182,7 +186,7 @@ async def test_completion_request_batched(client: openai.AsyncOpenAI, model_name
     assert embeddings.usage.prompt_tokens == len(input_tokens) * N
     assert embeddings.usage.total_tokens == len(input_tokens) * N
 
-    aphrodite_outputs = [d.embedding for d in embeddings.data]
+    aphrodite_outputs = float_embeddings(embeddings)
     run_embedding_correctness_test(hf_model, input_texts, aphrodite_outputs)
 
     # test list[list[int]]
@@ -200,7 +204,7 @@ async def test_completion_request_batched(client: openai.AsyncOpenAI, model_name
     assert embeddings.usage.prompt_tokens == len(input_tokens) * N
     assert embeddings.usage.total_tokens == len(input_tokens) * N
 
-    aphrodite_outputs = [d.embedding for d in embeddings.data]
+    aphrodite_outputs = float_embeddings(embeddings)
     run_embedding_correctness_test(hf_model, input_texts, aphrodite_outputs)
 
 
@@ -311,7 +315,7 @@ async def test_padding(client: openai.AsyncOpenAI, model_name: str):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model_name", [MODEL_NAME])
 async def test_chat_request(server: RemoteOpenAIServer, client: openai.AsyncOpenAI, model_name: str):
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {
             "role": "user",
             "content": "The cat sat on the mat.",
@@ -360,8 +364,8 @@ async def test_chat_request(server: RemoteOpenAIServer, client: openai.AsyncOpen
     assert chat_embeddings.created <= completion_embeddings.created
     # Use tolerance-based comparison for embeddings
     check_embeddings_close(
-        embeddings_0_lst=[d.embedding for d in chat_embeddings.data],
-        embeddings_1_lst=[d.embedding for d in completion_embeddings.data],
+        embeddings_0_lst=float_embeddings(chat_embeddings),
+        embeddings_1_lst=float_embeddings(completion_embeddings),
         name_0="chat",
         name_1="completion",
     )
@@ -460,7 +464,7 @@ async def test_invocations_completion_request(server: RemoteOpenAIServer, client
 
 @pytest.mark.asyncio
 async def test_invocations_chat_request(server: RemoteOpenAIServer):
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {
             "role": "user",
             "content": "The cat sat on the mat.",

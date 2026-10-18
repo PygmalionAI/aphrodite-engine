@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from aphrodite.entrypoints.speech_to_text.base.utils import read_upload_with_limit
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 
 def _make_upload_file(data: bytes, *, size: int | None = None) -> AsyncMock:
@@ -45,7 +45,7 @@ async def test_rejects_oversized_upload_via_content_length():
 
     upload = _make_upload_file(b"", size=oversized_bytes)
 
-    with pytest.raises(APHRODITEValidationError, match="Maximum file size exceeded"):
+    with pytest.raises(AphroditeValidationError, match="Maximum file size exceeded"):
         await read_upload_with_limit(upload, max_size_mb=max_mb)
 
     upload.read.assert_not_called()
@@ -60,7 +60,7 @@ async def test_rejects_oversized_upload_via_chunked_read():
 
     upload = _make_upload_file(oversized_data, size=None)
 
-    with pytest.raises(APHRODITEValidationError, match="Maximum file size exceeded"):
+    with pytest.raises(AphroditeValidationError, match="Maximum file size exceeded"):
         await read_upload_with_limit(upload, max_size_mb=max_mb)
 
 
@@ -98,7 +98,7 @@ async def test_rejects_at_one_byte_over_limit():
 
     upload = _make_upload_file(data, size=None)
 
-    with pytest.raises(APHRODITEValidationError, match="Maximum file size exceeded"):
+    with pytest.raises(AphroditeValidationError, match="Maximum file size exceeded"):
         await read_upload_with_limit(upload, max_size_mb=max_mb)
 
 
@@ -112,7 +112,7 @@ async def test_uses_env_default_when_no_limit_specified():
 
         upload = _make_upload_file(oversized_data, size=None)
 
-        with pytest.raises(APHRODITEValidationError, match="Maximum file size exceeded"):
+        with pytest.raises(AphroditeValidationError, match="Maximum file size exceeded"):
             await read_upload_with_limit(upload)
 
 
@@ -131,7 +131,7 @@ async def test_chunked_read_does_not_fully_materialize():
 
     upload = _make_upload_file(data, size=None)
 
-    with pytest.raises(APHRODITEValidationError):
+    with pytest.raises(AphroditeValidationError):
         await read_upload_with_limit(upload, max_size_mb=max_mb)
 
     chunk_size = 64 * 1024

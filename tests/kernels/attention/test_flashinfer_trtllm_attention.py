@@ -102,7 +102,9 @@ def make_nvfp4_kv_cache(kv_bf16_hnd: torch.Tensor, block_size: int, head_size: i
     v_data, v_scales = nvfp4_split_data_scale(v_cache_hnc)
 
     # Dequantize for the FA2 reference baseline.
-    ref_k = dequant_nvfp4_kv_cache(k_data, k_scales, kv_scale_val, head_size, block_size).to(torch.bfloat16)
+    ref_k = dequant_nvfp4_kv_cache(k_data, k_scales, kv_scale_val, head_size, block_size, swizzled_scales=False).to(
+        torch.bfloat16
+    )
     ref_v = dequant_nvfp4_kv_cache(v_data, v_scales, kv_scale_val, head_size, block_size).to(torch.bfloat16)
     ref_kv_bf16 = torch.stack([ref_k, ref_v], dim=1)  # [N, 2, H, T, D]
 

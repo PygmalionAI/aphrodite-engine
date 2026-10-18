@@ -26,7 +26,7 @@ from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse, UsageInfo
 from aphrodite.entrypoints.serve.engine.typing import SpeechToTextRequest
 from aphrodite.entrypoints.serve.utils.api_utils import get_max_tokens
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.inputs import EncoderDecoderInput, EngineInput
 from aphrodite.logger import init_logger
 from aphrodite.logprobs import FlatLogprobs, Logprob
@@ -218,6 +218,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
             max_tokens=1,
             temperature=0.0,
             allowed_token_ids=allowed_token_ids,
+            watermarking=False,
         )
 
         result_generator = self.engine_client.generate(
@@ -295,7 +296,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
         dec_prompt = prompt["decoder_prompt"]
 
         if not (isinstance(dec_prompt, dict) and "prompt" in dec_prompt):
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Expected decoder_prompt to contain text",
                 parameter="decoder_prompt",
                 value=type(dec_prompt).__name__,
@@ -334,8 +335,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
         segment_class: type[SpeechToTextSegment],
         start_time: float = 0,
     ) -> list[SpeechToTextSegment]:
-        """
-        Convert tokens to verbose segments.
+        """Convert tokens to verbose segments.
 
         This method expects the model to produce
         timestamps as tokens (similar to Whisper).
@@ -468,6 +468,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
             self.default_sampling_params,
         )
 
+        sampling_params: SamplingParams | BeamSearchParams
         if request.use_beam_search:
             sampling_params = request.to_beam_search_params(max_tokens, self.default_sampling_params)
         else:
@@ -476,8 +477,9 @@ class SpeechToTextBaseServing(GenerateBaseServing):
                 self.default_sampling_params,
             )
 
-        if request.response_format == "verbose_json":
-            sampling_params.logprobs = 1
+            if request.response_format == "verbose_json":
+                # Beam search already returns per-token logprobs.
+                sampling_params.logprobs = 1
 
         engine_request_ids = [
             request_id if len(engine_inputs) == 1 else f"{request_id}-{idx}" for idx in range(len(engine_inputs))

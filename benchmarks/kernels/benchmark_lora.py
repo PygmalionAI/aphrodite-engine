@@ -88,9 +88,7 @@ def make_rand_tensors(
     num_slices: int,
     device: str = "cuda",
 ) -> tuple[torch.Tensor, list[torch.Tensor], torch.Tensor]:
-    """
-    Make LoRA input/output matrices.
-    """
+    """Make LoRA input/output matrices."""
     A = torch.rand(a_shape, dtype=a_dtype).to(device)
 
     # LoRA weights column major
@@ -103,8 +101,7 @@ def make_rand_tensors(
 def make_prompt_lora_mapping(
     num_prompts: int, num_active_loras: int, sort_by_lora_id: bool, device: str
 ) -> torch.Tensor:
-    """
-    All prompts are mapped to a LoRA ID in range [0, num_active_loras).
+    """All prompts are mapped to a LoRA ID in range [0, num_active_loras).
     where 0 refers to first lora, 1 refers to second lora and so on.
     """
     assert num_active_loras > 0
@@ -131,9 +128,7 @@ def make_token_lora_mapping(
     seq_len_tensor: torch.Tensor,
     device: str,
 ):
-    """
-    Make token_lora_mapping from prompt_lora_mapping and seq_lens_tensor
-    """
+    """Make token_lora_mapping from prompt_lora_mapping and seq_lens_tensor."""
     assert prompt_lora_mapping.shape[0] == num_prompts
 
     # token to lora index mapping
@@ -158,8 +153,7 @@ def ref_group_gemm(
     scaling: float,
     add_inputs: bool | None,
 ):
-    """
-    Torch group gemm reference implementation to test correctness of
+    """Torch group gemm reference implementation to test correctness of
     benchmarking operations.
     """
     batches = seq_lens_cpu.size(0)
@@ -182,9 +176,7 @@ def ref_group_gemm(
 
 
 class OpType(Enum):
-    """
-    LoRA Ops to benchmark and its properties.
-    """
+    """LoRA Ops to benchmark and its properties."""
 
     LORA_SHRINK = auto()
     LORA_EXPAND = auto()
@@ -220,9 +212,7 @@ class OpType(Enum):
         return m, k, n
 
     def matmul_dtypes(self, op_dtype: torch.dtype) -> tuple[torch.dtype, torch.dtype, torch.dtype]:
-        """
-        return a type, b type and c type for A x B = C
-        """
+        """Return a type, b type and c type for A x B = C."""
         if self.is_shrink_fn():
             return op_dtype, op_dtype, torch.float32
         else:
@@ -238,8 +228,7 @@ class OpType(Enum):
         num_loras: int,
         num_slices: int,
     ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
-        """
-        Given num_slices, return the shapes of the A, B, and C matrices
+        """Given num_slices, return the shapes of the A, B, and C matrices
         in A x B = C, for the op_type
         """
         m, k, n = self.mkn(batch_size, seq_length, hidden_size, lora_rank)
@@ -299,9 +288,7 @@ class OpType(Enum):
 
 @dataclass
 class BenchmarkContext:
-    """
-    LoRA benchmark context
-    """
+    """LoRA benchmark context."""
 
     batch_size: int
     hidden_size: int
@@ -343,9 +330,7 @@ class BenchmarkContext:
 
 @dataclass
 class BenchmarkTensors:
-    """
-    Input/Output tensors used for benchmarks
-    """
+    """Input/Output tensors used for benchmarks."""
 
     # matmul tensors
     input: torch.Tensor
@@ -420,9 +405,7 @@ class BenchmarkTensors:
         )
 
     def sanity_check(self) -> None:
-        """
-        Fails asserts when non-conformality is detected.
-        """
+        """Fails asserts when non-conformality is detected."""
         num_tokens = self.input.shape[-2]
         # check metadata tensors
         assert torch.sum(self.seq_lens) == num_tokens
@@ -432,9 +415,7 @@ class BenchmarkTensors:
         assert self.lora_kernel_meta.token_lora_mapping.shape[0] == num_tokens
 
     def to_device(self, device: str):
-        """
-        Transfer tensors to device if the tensors aren't already on the device
-        """
+        """Transfer tensors to device if the tensors aren't already on the device."""
 
         def to_device(tensor: torch.Tensor):
             if tensor.device != device:
@@ -458,10 +439,8 @@ class BenchmarkTensors:
                 to_device(field) if field_name != "no_lora_flag_cpu" else field,
             )
 
-    def metadata(self) -> tuple[int, int, int]:
-        """
-        Return num_seqs, num_tokens and max_seq_len
-        """
+    def metadata(self) -> tuple[int, int, int, int]:
+        """Return num_seqs, num_tokens, max_seq_len and num_slices."""
         num_seqs = self.seq_lens.shape[0]
         num_tokens = self.lora_kernel_meta.token_lora_mapping.shape[0]
         max_seq_len = torch.max(self.seq_lens).item()
@@ -557,8 +536,7 @@ class BenchmarkTensors:
         raise ValueError(f"Unrecognized optype {self}")
 
     def test_correctness(self, op_type: OpType, expand_fn_add_inputs: bool | None) -> bool:
-        """
-        Test correctness of op_type implementation against a grouped gemm
+        """Test correctness of op_type implementation against a grouped gemm
         reference implementation.
         """
         seq_lens_cpu = self.seq_lens.to(device="cpu")
@@ -652,15 +630,13 @@ def bench_torch_mm(
     op_type: OpType,
     cuda_graph_nops: int | None = None,
 ) -> TMeasurement:
-    """
-    Benchmark basic torch.mm as a roofline.
+    """Benchmark basic torch.mm as a roofline.
 
     When all the input tokens have the same LoRA ID, the LoRA kernels are just
     a matmul. This torch.mm benchmark serves as a roofline for that case.
 
     input op_type is used in determining the m, k, n dimensions for the matmul.
     """
-
     batch_size, hidden_size, lora_rank, seq_length, dtype = (
         ctx.batch_size,
         ctx.hidden_size,

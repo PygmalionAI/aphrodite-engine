@@ -51,7 +51,10 @@ class PoolingRunner:
         self.pooling_params: dict[int, PoolingParams] = {}
         self.pooling_states: dict[int, PoolingStates] = {}
         self.prompt_token_ids: dict[int, torch.Tensor] = {}
-        self.late_interaction_runner = LateInteractionRunner()
+        pooler_config = self.model_config.pooler_config
+        self.late_interaction_runner = LateInteractionRunner(
+            enable_flash=pooler_config is None or getattr(pooler_config, "enable_flash_late_interaction", True)
+        )
 
     @staticmethod
     def get_supported_tasks(model: nn.Module) -> list[PoolingTask]:
@@ -64,7 +67,7 @@ class PoolingRunner:
         req_id: str,
         req_index: int,
         pooling_params: PoolingParams,
-        prompt_token_ids: list[int],
+        prompt_token_ids: list[int] | None,
     ) -> None:
         task = pooling_params.task
         if task not in self.supported_tasks:
@@ -74,6 +77,7 @@ class PoolingRunner:
         self.pooling_params[req_index] = pooling_params
         self.pooling_states[req_index] = PoolingStates()
         if pooling_params.requires_token_ids:
+            assert prompt_token_ids is not None
             self.prompt_token_ids[req_index] = torch.tensor(prompt_token_ids, dtype=torch.int64)
 
     def remove_request(self, req_index: int) -> None:
@@ -87,6 +91,9 @@ class PoolingRunner:
 
     def clear(self) -> None:
         self.late_interaction_runner.clear()
+
+    def release_late_interaction_query_cache(self, query_keys: list[str]) -> None:
+        self.late_interaction_runner.release_queries(query_keys)
 
     def _get_pooling_metadata(
         self,

@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import mlx.core as mx
+import torch
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.distributed import (
@@ -155,6 +156,13 @@ class MetalWorker(WorkerBase):
             aphrodite_config=self.aphrodite_config,
             device=self.device,
         )
+
+    def synchronize_device(self) -> None:
+        """Drain MLX and the optional PyTorch MPS sampler before engine RPCs."""
+        if self.metal_config.use_mlx:
+            mx.synchronize()
+        if self.device is not None and self.device.type == "mps":
+            torch.mps.synchronize()
 
     def load_model(self, *, load_dummy_weights: bool = False) -> None:
         """Load the model onto the Metal device."""
@@ -374,7 +382,14 @@ class MetalWorker(WorkerBase):
         except Exception as e:
             raise RuntimeError(f"Metal worker health check failed: {e}") from e
 
-    def profile(self, is_start: bool = True, profile_prefix: str | None = None) -> None:
+    def profile(
+        self,
+        is_start: bool = True,
+        profile_prefix: str | None = None,
+        *,
+        delay_iterations: int | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
         """Start or stop a Metal frame capture.
 
         Routed via the engine's ``collective_rpc("profile", ...)``, which is
@@ -398,7 +413,7 @@ class MetalWorker(WorkerBase):
                 rank_suffix = get_worker_rank_suffix(global_rank=self.rank)
                 trace_name = f"{profile_prefix}_{rank_suffix}" if profile_prefix else rank_suffix
                 self._metal_profiler = MetalProfilerWrapper(profiler_config, trace_name)
-            self._metal_profiler.start()
+            self._metal_profiler.start(delay_iterations=delay_iterations, max_iterations=max_iterations)
         else:
             if self._metal_profiler is None:
                 logger.warning("Profiler was not started; nothing to stop.")

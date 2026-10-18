@@ -29,6 +29,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import ChatCompletion
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.entrypoints.openai.responses.serving import OpenAIServingResponses
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.inputs import tokens_input
 from aphrodite.renderers.online_renderer import OnlineRenderer
 from aphrodite.renderers.params import ChatParams
@@ -85,9 +86,10 @@ class MockModelConfig:
     generation_config: str = "auto"
     override_generation_config: dict[str, Any] = field(default_factory=dict)
     media_io_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    skip_tokenizer_init = False
+    skip_tokenizer_init: bool = False
     is_encoder_decoder: bool = False
     is_multimodal_model: bool = False
+    supports_multimodal_inputs: bool = False
     renderer_num_workers: int = 1
     enable_prompt_embeds: bool = False
 
@@ -151,7 +153,8 @@ async def _capture_responses(
     request: ResponsesRequest,
 ) -> CapturedRenderInputs:
     capture = RenderCapture(serving.online_renderer)
-    await serving._make_request(request, prev_response=None)
+    result = await serving.online_renderer.render_responses(request)
+    assert not isinstance(result, ErrorResponse), result
     return capture.take()
 
 
@@ -215,7 +218,7 @@ def online_renderer(model_config: MockModelConfig, request) -> OnlineRenderer:
     renderer.tokenizer = MagicMock()
 
     return OnlineRenderer(
-        model_config=model_config,  # type: ignore[arg-type]
+        model_config=model_config,
         renderer=renderer,
         request_logger=None,
         chat_template=None,
@@ -223,6 +226,7 @@ def online_renderer(model_config: MockModelConfig, request) -> OnlineRenderer:
         enable_auto_tools=True,
         tool_parser="openai",
         exclude_tools_when_tool_choice_none=exclude_tools_when_tool_choice_none,
+        trust_request_mm_kwargs=True,
     )
 
 
@@ -412,6 +416,17 @@ class TestReasoningRenderParity:
                 "tool_choice": "none",
             },
         )
+
+    async def test_reasoning_effort_none_rejected_by_harmony(self, online_renderer):
+        """Harmony rejects reasoning_effort="none" as invalid user input."""
+        request = ChatCompletionRequest(
+            model=_MODEL,
+            messages=_USER,
+            reasoning_effort="none",
+        )
+        with pytest.raises(AphroditeValidationError, match="Harmony does not support") as exc_info:
+            online_renderer._make_request_with_harmony(request)
+        assert exc_info.value.parameter == "reasoning_effort"
 
     async def test_explicit_enable_thinking_not_overridden(self, online_renderer, serving_responses):
         await _assert_parity(

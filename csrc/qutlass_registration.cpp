@@ -1,5 +1,6 @@
 #include "core/registration.h"
 
-// QuTLASS registers torch.ops._qutlass_C via TORCH_LIBRARY in bindings.cpp.
-// This stub lets Python import aphrodite._qutlass_C to trigger op registration.
+// QuTLASS registers torch.ops._qutlass_C via STABLE_TORCH_LIBRARY in
+// bindings.cpp. Importing aphrodite._qutlass_C triggers those stable-ABI
+// registrations.
 REGISTER_EXTENSION(_qutlass_C)

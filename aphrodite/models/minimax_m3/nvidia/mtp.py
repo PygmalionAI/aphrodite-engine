@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from aphrodite.config import AphroditeConfig
+from aphrodite.distributed import get_pp_group
 from aphrodite.model_executor.layers.fused_moe import (
     fused_moe_make_expert_params_mapping,
 )
@@ -139,6 +140,10 @@ class MiniMaxM3MultiTokenPredictor(nn.Module):
 class MiniMaxM3MTP(nn.Module):
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = ""):
         super().__init__()
+
+        if aphrodite_config.use_v2_model_runner and get_pp_group().world_size > 1:
+            # Preserve embeddings from loaders that bypass load_weights.
+            self.has_own_embed_tokens = aphrodite_config.load_config.load_format != "dummy"
 
         assert aphrodite_config.speculative_config is not None
         self.config = aphrodite_config.speculative_config.draft_model_config.hf_config
@@ -298,4 +303,10 @@ class MiniMaxM3MTP(nn.Module):
             if layer_idx not in loaded_mtp_layers and is_mtp_completeness_check_enabled():
                 raise ValueError(f"Failed to load MTP layer {layer_idx} weights from checkpoint.")
 
+        if hasattr(self, "has_own_embed_tokens"):
+            if "model.embed_tokens.weight" in loaded_params:
+                self.has_own_embed_tokens = True
+            elif is_mtp_completeness_check_enabled():
+                # A complete checkpoint without embeddings borrows the target's.
+                self.has_own_embed_tokens = False
         return loaded_params

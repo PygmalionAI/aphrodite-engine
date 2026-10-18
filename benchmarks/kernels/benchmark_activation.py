@@ -3,10 +3,10 @@
 # benchmark custom activation op performance
 import itertools
 
-import aphrodite.modeling.layers.activation  # noqa F401
 import torch
-from aphrodite.modeling.custom_op import CustomOp
 
+import aphrodite.model_executor.layers.activation  # noqa F401
+from aphrodite.model_executor.custom_op import CustomOp
 from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import triton
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser

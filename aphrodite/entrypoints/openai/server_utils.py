@@ -23,7 +23,7 @@ from aphrodite.engine.protocol import EngineClient
 from aphrodite.entrypoints.launchers.launcher import terminate_if_errored
 from aphrodite.entrypoints.serve.engine.protocol import ErrorInfo, ErrorResponse
 from aphrodite.entrypoints.utils import create_error_response, sanitize_message
-from aphrodite.exceptions import APHRODITEValidationError, GenerationError
+from aphrodite.exceptions import AphroditeValidationError, GenerationError
 from aphrodite.logger import init_logger
 from aphrodite.utils.gc_utils import freeze_gc_heap
 from aphrodite.v1.engine.exceptions import EngineDeadError, EngineGenerateError
@@ -392,7 +392,7 @@ async def validation_exception_handler(req: Request, exc: RequestValidationError
     for error in errors:
         if "ctx" in error and "error" in error["ctx"]:
             ctx_error = error["ctx"]["error"]
-            if isinstance(ctx_error, APHRODITEValidationError):
+            if isinstance(ctx_error, AphroditeValidationError):
                 param = ctx_error.parameter
                 break
 

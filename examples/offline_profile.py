@@ -8,9 +8,9 @@ from argparse import RawTextHelpFormatter
 from dataclasses import asdict, dataclass
 
 import torch
-from aphrodite.engine.args_tools import EngineArgs
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.engine.arg_utils import EngineArgs
 from aphrodite.profiler import layerwise_profile
 from aphrodite.utils import FlexibleArgumentParser
 

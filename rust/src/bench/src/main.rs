@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -11,17 +11,25 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[derive(Parser)]
 #[command(
     name = "aphrodite-bench",
-    about = "Benchmark online serving throughput",
+    about = "Benchmark online serving throughput and offline multimodal preprocessing",
     version = aphrodite_build_info::VERSION
 )]
 struct Cli {
     #[command(flatten)]
     args: aphrodite_bench::BenchServeArgs,
+
+    /// Optional subcommand; absent by default for the online serving benchmark.
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Offline multimodal preprocessing latency benchmark.
+    MmProcessor(aphrodite_bench::MmProcessorArgs),
 }
 
 fn main() -> anyhow::Result<()> {
-    aphrodite_tracing::init_tracing("Bench");
-
     let cli = Cli::parse();
 
     aphrodite_bench::prepare_process();
@@ -31,5 +39,15 @@ fn main() -> anyhow::Result<()> {
         .build()
         .context("Failed to build tokio runtime")?;
 
-    runtime.block_on(aphrodite_bench::run(cli.args))
+    match cli.command {
+        Some(Command::MmProcessor(args)) => {
+            let (timing_layer, timing_stats) = aphrodite_chat::mm_timing_layer();
+            aphrodite_tracing::init_tracing_with("Bench", timing_layer);
+            runtime.block_on(aphrodite_bench::run_mm_processor(args, timing_stats))
+        }
+        None => {
+            aphrodite_tracing::init_tracing("Bench");
+            runtime.block_on(aphrodite_bench::run(cli.args))
+        }
+    }
 }

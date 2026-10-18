@@ -7,16 +7,24 @@ from aphrodite.config import AphroditeConfig, replace
 from aphrodite.config.speculative import resolve_draft_kv_cache_dtype
 from aphrodite.distributed.parallel_state import get_pp_group
 from aphrodite.lora.layers.base import BaseLayerWithLoRA
+from aphrodite.model_executor.layers.quantization.online.lm_head import (
+    quantized_lm_head_copy,
+)
 from aphrodite.model_executor.model_loader import get_model
+from aphrodite.model_executor.model_loader.utils import get_draft_load_config
 from aphrodite.model_executor.models.utils import PPMissingLayer
+from aphrodite.v1.worker.gpu.spec_decode.utils import get_pp_safe_draft_load_config
 
 
 def _should_share(eagle: nn.Module, flag: str, draft, target) -> bool:
-    """Share when the draft has no own copy, or its copy matches the target."""
+    """Share unless the draft declares its own copy that differs from the target.
 
-    if not getattr(eagle, flag, False) or draft is None:
+    A draft that declares its own copy but has no top-level one (e.g. MTP
+    heads stored per layer) keeps it.
+    """
+    if not getattr(eagle, flag, False):
         return True
-    if target is None:
+    if draft is None or target is None:
         return False
     # torch.equal on GPU allocates a bool mask the size of the input.
     # Use the faster GPU path when there is plenty of headroom;
@@ -65,6 +73,7 @@ def load_eagle_model(target_model: nn.Module, aphrodite_config: AphroditeConfig)
     speculative_config = aphrodite_config.speculative_config
     assert speculative_config is not None
     draft_model_config = speculative_config.draft_model_config
+    aphrodite_config = speculative_config.apply_draft_overrides(aphrodite_config)
     aphrodite_config = replace(
         aphrodite_config,
         cache_config=replace(
@@ -75,16 +84,9 @@ def load_eagle_model(target_model: nn.Module, aphrodite_config: AphroditeConfig)
             ),
         ),
     )
-    if speculative_config.attention_backend is not None:
-        # Before get_model(): the backend is read off the constructed layers.
-        # Only when set, so the draft keeps a KV cache layout the target shares.
-        aphrodite_config = replace(
-            aphrodite_config,
-            attention_config=replace(
-                aphrodite_config.attention_config,
-                backend=speculative_config.attention_backend,
-            ),
-        )
+    draft_load_config = get_pp_safe_draft_load_config(get_draft_load_config(aphrodite_config))
+    if draft_load_config is not aphrodite_config.load_config:
+        aphrodite_config = replace(aphrodite_config, load_config=draft_load_config)
     with set_model_tag("eagle_head"):
         eagle_model = get_model(aphrodite_config=aphrodite_config, model_config=draft_model_config)
 
@@ -99,9 +101,12 @@ def load_eagle_model(target_model: nn.Module, aphrodite_config: AphroditeConfig)
     target_lm_head = get_target_lm_head(target_model, target_language_model)
     draft_lm_head = getattr(eagle_model, "lm_head", None)
     if target_lm_head is not None and _should_share(eagle_model, "has_own_lm_head", draft_lm_head, target_lm_head):
+        draft_head = target_lm_head
+        if speculative_config.draft_lm_head_quantization is not None:
+            draft_head = quantized_lm_head_copy(target_lm_head, speculative_config.draft_lm_head_quantization)
         if draft_lm_head is not None:
             del eagle_model.lm_head
-        eagle_model.lm_head = target_lm_head
+        eagle_model.lm_head = draft_head
 
         # MTP layers route logits through layer.shared_head.head, not
         # eagle_model.lm_head, so the per-layer copies need fixing up too.
@@ -112,7 +117,9 @@ def load_eagle_model(target_model: nn.Module, aphrodite_config: AphroditeConfig)
                 sh = getattr(layer, "shared_head", None)
                 if sh is not None and hasattr(sh, "head"):
                     del sh.head
-                    sh.head = target_lm_head
+                    sh.head = draft_head
+    elif speculative_config.draft_lm_head_quantization is not None:
+        raise ValueError("draft_lm_head_quantization needs a drafter that shares the target lm_head.")
 
     # MTP shares topk_indices_buffer with the target model. We update
     # every module in the draft that holds a buffer reference so that

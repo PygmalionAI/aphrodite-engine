@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 import torch.distributed as dist
@@ -15,7 +16,18 @@ import aphrodite.envs as envs
 from aphrodite.config import AphroditeConfig
 from aphrodite.distributed import get_dcp_group
 from aphrodite.logger import init_logger
+from aphrodite.model_executor.warmup.jit_warmup import (
+    WarmupIntRange,
+    kernel_launcher,
+)
+from aphrodite.model_executor.warmup.jit_warmup_triton_helper import (
+    AphroditeTritonJitKernel,
+    LaunchSpec,
+    TritonWarmupTensor,
+    triton_scalar_specialization_rep,
+)
 from aphrodite.triton_utils import tl, triton
+from aphrodite.v1.attention.backend import max_decode_query_len
 from aphrodite.v1.attention.ops.cp_common import (
     DirectCPWorkspace,
     direct_cp_enabled,
@@ -34,17 +46,40 @@ if TYPE_CHECKING:
 # LSE/output combine
 
 
+def _validate_dcp_empty_shard_args(
+    seq_lens: torch.Tensor | None,
+    query_start_loc: torch.Tensor | None,
+) -> bool:
+    """Validate the empty-shard mask inputs.
+
+    Returns True when masking is requested, False when it is disabled. Raises on
+    an inconsistent pair. Performs no device work so it is safe to call from a
+    CUDA-graph-captured region.
+    """
+    if seq_lens is None and query_start_loc is None:
+        return False
+    if seq_lens is None or query_start_loc is None:
+        raise ValueError("seq_lens and query_start_loc must be provided together")
+    if seq_lens.ndim != 1 or query_start_loc.ndim != 1 or query_start_loc.shape[0] != seq_lens.shape[0] + 1:
+        raise ValueError("query_start_loc must contain one boundary per sequence")
+    return True
+
+
 def mask_dcp_empty_shards_(
     lse: torch.Tensor,
     seq_lens: torch.Tensor | None,
     query_start_loc: torch.Tensor | None,
 ) -> None:
-    if seq_lens is None and query_start_loc is None:
+    if not _validate_dcp_empty_shard_args(seq_lens, query_start_loc):
         return
-    if seq_lens is None or query_start_loc is None:
-        raise ValueError("seq_lens and query_start_loc must be provided together")
-    if seq_lens.ndim != 1 or query_start_loc.ndim != 1 or query_start_loc.shape[0] != seq_lens.shape[0] + 1:
-        raise ValueError("query_start_loc must contain one boundary per sequence")
+    assert seq_lens is not None and query_start_loc is not None
+
+    # A DCP rank can receive no local sequences during CUDA graph warmup even
+    # though the padded LSE buffer still has rows. In that case every row is an
+    # empty shard; avoid indexing the empty seq_lens tensor below.
+    if seq_lens.shape[0] == 0:
+        lse.fill_(float("-inf"))
+        return
 
     row_indices = torch.arange(lse.shape[0], device=lse.device, dtype=query_start_loc.dtype)
     sequence_indices = torch.searchsorted(query_start_loc[1:], row_indices, right=True).clamp_max(seq_lens.shape[0] - 1)
@@ -55,83 +90,248 @@ def mask_dcp_empty_shards_(
 # AG + RS/AR implementation
 
 
-@triton.jit
-def _correct_attn_cp_out_kernel(
-    outputs_ptr,
-    new_output_ptr,
-    lses_ptr,
-    vlse_ptr,
-    outputs_stride_B,
-    outputs_stride_H,
-    outputs_stride_D,
-    lses_stride_N,
-    lses_stride_B,
-    lses_stride_H,
-    lse_idx,
-    HEAD_DIM: tl.constexpr,
-    N_ROUNDED: tl.constexpr,
-    IS_BASE_E: tl.constexpr,
-):
-    """
-    Apply the all-gathered lses to correct each local rank's attention
-    output. we still need perform a cross-rank reduction to obtain the
-    final attention output.
+class CorrectAttnCPOutKernel(AphroditeTritonJitKernel["CorrectAttnCPOutKernel.CompileKey"]):
+    @dataclass(frozen=True)
+    class CompileKey:
+        output_dtype: torch.dtype
+        lse_dtype: torch.dtype
+        outputs_stride_b: int
+        outputs_stride_h: int
+        outputs_stride_d: int
+        lses_stride_n: int
+        lses_stride_b: int
+        lses_stride_h: int
+        lse_idx: int
+        head_dim: int
+        n_rounded: int
+        is_base_e: bool
 
-    Args:
-        outputs_ptr (triton.PointerType):
-            Pointer to input tensor of shape [ B, H, D ]
-        lses_ptr (triton.PointerType):
-            Pointer to input tensor of shape [ N, B, H ]
-        new_output_ptr (triton.PointerType):
-            Pointer to output tensor of shape [ B, H, D ]
-        vlse_ptr (triton.PointerType):
-            Pointer to output tensor of shape [ B, H ]
-    """
-    batch_idx = tl.program_id(axis=0).to(tl.int64)
-    head_idx = tl.program_id(axis=1).to(tl.int64)
-    d_offsets = tl.arange(0, HEAD_DIM)
-    num_n_offsets = tl.arange(0, N_ROUNDED)
+    @staticmethod
+    @triton.jit
+    def kernel(
+        outputs_ptr,
+        new_output_ptr,
+        lses_ptr,
+        vlse_ptr,
+        outputs_stride_B,
+        outputs_stride_H,
+        outputs_stride_D,
+        lses_stride_N,
+        lses_stride_B,
+        lses_stride_H,
+        lse_idx,
+        HEAD_DIM: tl.constexpr,
+        N_ROUNDED: tl.constexpr,
+        IS_BASE_E: tl.constexpr,
+    ):
+        """Apply the all-gathered lses to correct each local rank's attention
+        output. we still need perform a cross-rank reduction to obtain the
+        final attention output.
 
-    # shape = [N]
-    lse_offsets = num_n_offsets * lses_stride_N + batch_idx * lses_stride_B + head_idx * lses_stride_H
+        Args:
+            outputs_ptr (triton.PointerType):
+                Pointer to input tensor of shape [ B, H, D ]
+            lses_ptr (triton.PointerType):
+                Pointer to input tensor of shape [ N, B, H ]
+            new_output_ptr (triton.PointerType):
+                Pointer to output tensor of shape [ B, H, D ]
+            vlse_ptr (triton.PointerType):
+                Pointer to output tensor of shape [ B, H ]
+            outputs_stride_B (int): Batch stride of ``outputs_ptr``
+            outputs_stride_H (int): Head stride of ``outputs_ptr``
+            outputs_stride_D (int): Head-dim stride of ``outputs_ptr``
+            lses_stride_N (int): Rank stride of ``lses_ptr``
+            lses_stride_B (int): Batch stride of ``lses_ptr``
+            lses_stride_H (int): Head stride of ``lses_ptr``
+            lse_idx (int): Index of this rank's lse within the all-gathered tensor
+            HEAD_DIM: Head dimension, as a constexpr
+            N_ROUNDED: Rank count rounded to a power of two, as a constexpr
+            IS_BASE_E: Whether the lses are natural-log based, as a constexpr
 
-    # calc final lse
-    lse = tl.load(lses_ptr + lse_offsets).to(tl.float32)
-    lse = tl.where((lse != lse) | (lse == float("inf")), -float("inf"), lse)
-    lse_max = tl.max(lse, axis=0)
-    lse_max = tl.where(lse_max == -float("inf"), 0, lse_max)
-    lse -= lse_max
-    if IS_BASE_E:
-        lse_exp = tl.exp(lse)
-        lse_acc = tl.sum(lse_exp, axis=0)
-        lse = tl.log(lse_acc)
-    else:
-        lse_exp = tl.exp2(lse)
-        lse_acc = tl.sum(lse_exp, axis=0)
-        lse = tl.log2(lse_acc)
-    lse += lse_max
+        """
+        batch_idx = tl.program_id(axis=0).to(tl.int64)
+        head_idx = tl.program_id(axis=1).to(tl.int64)
+        d_offsets = tl.arange(0, HEAD_DIM)
+        num_n_offsets = tl.arange(0, N_ROUNDED)
 
-    lse_offsets = batch_idx * lses_stride_B + head_idx * lses_stride_H
-    tl.store(vlse_ptr + lse_offsets, lse)
+        # shape = [N]
+        lse_offsets = num_n_offsets * lses_stride_N + batch_idx * lses_stride_B + head_idx * lses_stride_H
 
-    # shape = [D]
-    output_offsets = batch_idx * outputs_stride_B + head_idx * outputs_stride_H + d_offsets * outputs_stride_D
+        # calc final lse
+        lse = tl.load(lses_ptr + lse_offsets).to(tl.float32)
+        lse = tl.where((lse != lse) | (lse == float("inf")), -float("inf"), lse)
+        lse_max = tl.max(lse, axis=0)
+        lse_max = tl.where(lse_max == -float("inf"), 0, lse_max)
+        lse -= lse_max
+        if IS_BASE_E:
+            lse_exp = tl.exp(lse)
+            lse_acc = tl.sum(lse_exp, axis=0)
+            lse = tl.log(lse_acc)
+        else:
+            lse_exp = tl.exp2(lse)
+            lse_acc = tl.sum(lse_exp, axis=0)
+            lse = tl.log2(lse_acc)
+        lse += lse_max
 
-    # correct output
-    lse_offset = lse_idx * lses_stride_N + batch_idx * lses_stride_B + head_idx * lses_stride_H
-    lse_tmp = tl.load(lses_ptr + lse_offset).to(tl.float32)
-    lse_finally = lse_tmp - lse
-    lse_finally = tl.where(
-        (lse_finally != lse_finally) | (lse_finally == float("inf")),
-        -float("inf"),
-        lse_finally,
-    )
-    factor = tl.exp(lse_finally) if IS_BASE_E else tl.exp2(lse_finally)
-    output = tl.load(outputs_ptr + output_offsets)
-    output = output * factor
-    output = tl.where(factor == 0.0, 0.0, output)
+        lse_offsets = batch_idx * lses_stride_B + head_idx * lses_stride_H
+        tl.store(vlse_ptr + lse_offsets, lse)
 
-    tl.store(new_output_ptr + output_offsets, output)
+        # shape = [D]
+        output_offsets = batch_idx * outputs_stride_B + head_idx * outputs_stride_H + d_offsets * outputs_stride_D
+
+        # correct output
+        lse_offset = lse_idx * lses_stride_N + batch_idx * lses_stride_B + head_idx * lses_stride_H
+        lse_tmp = tl.load(lses_ptr + lse_offset).to(tl.float32)
+        lse_finally = lse_tmp - lse
+        lse_finally = tl.where(
+            (lse_finally != lse_finally) | (lse_finally == float("inf")),
+            -float("inf"),
+            lse_finally,
+        )
+        factor = tl.exp(lse_finally) if IS_BASE_E else tl.exp2(lse_finally)
+        output = tl.load(outputs_ptr + output_offsets)
+        output = output * factor
+        output = tl.where(factor == 0.0, 0.0, output)
+
+        tl.store(new_output_ptr + output_offsets, output)
+
+    def dispatch(  # type: ignore[override]
+        self,
+        *,
+        output_dtype: torch.dtype,
+        lse_dtype: torch.dtype,
+        num_tokens: int,
+        num_heads: int,
+        head_dim: int,
+        n_rounded: int,
+        lse_idx: int,
+        is_base_e: bool,
+    ) -> CompileKey:
+        # Warm the contiguous [B, H, D] output and [N, B, H] LSE layouts used
+        # by the production collective path. Runtime still forwards real
+        # strides so unsupported layouts remain correct, but may compile on
+        # first use under the JIT monitor.
+        outputs_stride_d = 1
+        outputs_stride_h = head_dim
+        outputs_stride_b = num_heads * head_dim
+        lses_stride_h = 1
+        lses_stride_b = num_heads
+        lses_stride_n = num_tokens * num_heads
+        return self.CompileKey(
+            output_dtype=output_dtype,
+            lse_dtype=lse_dtype,
+            outputs_stride_b=triton_scalar_specialization_rep(outputs_stride_b),
+            outputs_stride_h=triton_scalar_specialization_rep(outputs_stride_h),
+            outputs_stride_d=triton_scalar_specialization_rep(outputs_stride_d),
+            lses_stride_n=triton_scalar_specialization_rep(lses_stride_n),
+            lses_stride_b=triton_scalar_specialization_rep(lses_stride_b),
+            lses_stride_h=triton_scalar_specialization_rep(lses_stride_h),
+            lse_idx=triton_scalar_specialization_rep(lse_idx),
+            head_dim=head_dim,
+            n_rounded=n_rounded,
+            is_base_e=is_base_e,
+        )
+
+    def get_warmup_keys(
+        self,
+        aphrodite_config: Any,
+        *,
+        output_dtype: torch.dtype | None = None,
+        num_heads: int | None = None,
+        head_dim: int | None = None,
+        is_base_e: bool | tuple[bool, ...] = (False, True),
+    ) -> list[CompileKey]:
+        from aphrodite.model_executor.layers.attention.mla_attention import (
+            get_mla_dims,
+        )
+
+        dcp_world_size = aphrodite_config.parallel_config.decode_context_parallel_size
+        max_tokens = min(
+            16,
+            aphrodite_config.scheduler_config.max_num_batched_tokens,
+        )
+        hf_config = aphrodite_config.model_config.hf_config
+        if num_heads is None:
+            num_heads = hf_config.num_attention_heads // aphrodite_config.parallel_config.tensor_parallel_size
+        if head_dim is None:
+            head_dim = get_mla_dims(aphrodite_config.model_config).v_head_dim
+        if output_dtype is None:
+            output_dtype = aphrodite_config.model_config.dtype
+        if dcp_world_size <= 1 or max_tokens <= 0 or num_heads <= 0:
+            return []
+        return self._trace_dispatch(self.dispatch)(
+            output_dtype=output_dtype,
+            lse_dtype=torch.float32,
+            num_tokens=WarmupIntRange(1, max_tokens + 1),
+            num_heads=num_heads,
+            head_dim=head_dim,
+            n_rounded=dcp_world_size,
+            lse_idx=WarmupIntRange(0, dcp_world_size),
+            is_base_e=is_base_e,
+        )
+
+    def warmup_inputs(self, compile_key: CompileKey) -> dict[str, Any]:
+        output_ptr = TritonWarmupTensor(
+            compile_key.output_dtype,
+            shape=(1, 1, compile_key.head_dim),
+            strides=(
+                compile_key.outputs_stride_b,
+                compile_key.outputs_stride_h,
+                compile_key.outputs_stride_d,
+            ),
+        )
+        lse_ptr = TritonWarmupTensor(
+            compile_key.lse_dtype,
+            shape=(compile_key.n_rounded, 1, 1),
+            strides=(
+                compile_key.lses_stride_n,
+                compile_key.lses_stride_b,
+                compile_key.lses_stride_h,
+            ),
+        )
+        return dict(
+            outputs=output_ptr,
+            new_output=output_ptr,
+            lses=lse_ptr,
+            vlse=lse_ptr,
+            lse_idx=compile_key.lse_idx,
+            ctx=None,
+            is_base_e=compile_key.is_base_e,
+        )
+
+    @kernel_launcher
+    def __call__(
+        self,
+        outputs: torch.Tensor,
+        new_output: torch.Tensor,
+        lses: torch.Tensor,
+        vlse: torch.Tensor,
+        lse_idx: int,
+        ctx: Any,
+        *,
+        is_base_e: bool,
+    ) -> LaunchSpec:
+        num_tokens, num_heads, head_dim = outputs.shape
+        n_rounded = lses.shape[0]
+        outputs_stride_b, outputs_stride_h, outputs_stride_d = outputs.stride()
+        lses_stride_n, lses_stride_b, lses_stride_h = lses.stride()
+        grid = (num_tokens, num_heads, 1)
+        return grid, dict(
+            outputs_stride_B=outputs_stride_b,
+            outputs_stride_H=outputs_stride_h,
+            outputs_stride_D=outputs_stride_d,
+            lses_stride_N=lses_stride_n,
+            lses_stride_B=lses_stride_b,
+            lses_stride_H=lses_stride_h,
+            HEAD_DIM=head_dim,
+            N_ROUNDED=n_rounded,
+            IS_BASE_E=is_base_e,
+            _runtime_launcher=None if self._warming else ctx.call_kernel,
+            # CPTritonContext caches the non-constexpr positional prefix; derive
+            # its length so adding/reordering a kernel arg cannot silently
+            # misalign the cached replay path.
+            _runtime_launcher_arg_count=len(self.kernel.arg_names) - len(self.kernel.constexprs),
+        )
 
 
 class CPTritonContext:
@@ -161,9 +361,11 @@ def correct_attn_out(
         lses: Tensor of shape [ N, B, H ]
         cp_rank: Current rank in the context-parallel group
         ctx: Triton context to avoid recompilation
+        is_lse_base_on_e: Whether the lses use base e rather than base 2
 
     Returns:
         Tuple of (out, lse) with corrected attention and final log-sum-exp.
+
     """
     if ctx is None:
         ctx = CPTritonContext()
@@ -179,37 +381,26 @@ def correct_attn_out(
         lses = lses.squeeze(1)
     assert lses.ndim == 3, f"expected lses [N,B,H] (optionally with a 1-sized extra dim), got {tuple(lses.shape)}"
 
-    B, H, D = out.shape
-    N = lses.shape[0]
+    B, H, _ = out.shape
 
     # Strides after we normalized shapes to 3-D views.  The kernel computes
     # offsets for `vlse_ptr` using lses_stride_B/H, so the output buffer must
     # have the same B/H stride layout as a slice of `lses`.
-    o_sB, o_sH, o_sD = out.stride()
-    l_sN, l_sB, l_sH = lses.stride()
+    _, l_sB, l_sH = lses.stride()
 
     # Allocate LSE with the same B/H strides as `lses` so writes land correctly
     # even when `lses` is a non-contiguous view (e.g., 4-D to 3-D squeeze).
     lse = torch.empty_strided((B, H), (l_sB, l_sH), device=lses.device, dtype=lses.dtype)
 
-    # Kernel launch config
-    grid = (B, H, 1)
-
-    regular_args = (
+    _CORRECT_ATTN_CP_OUT_KERNEL(
         out,
         out,
         lses,
         lse,
-        o_sB,
-        o_sH,
-        o_sD,
-        l_sN,
-        l_sB,
-        l_sH,
         cp_rank,
+        ctx,
+        is_base_e=is_lse_base_on_e,
     )
-    const_args = {"HEAD_DIM": D, "N_ROUNDED": N, "IS_BASE_E": is_lse_base_on_e}
-    ctx.call_kernel(_correct_attn_cp_out_kernel, grid, *regular_args, **const_args)
     return out, lse
 
 
@@ -222,8 +413,7 @@ def _cp_lse_common(
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
 ):
-    """
-    cp_attn_out: [ B, H, D ]
+    """cp_attn_out: [ B, H, D ]
     cp_attn_lse: [ B, H ]
     """
     if cp_group.world_size == 1:
@@ -255,8 +445,7 @@ def cp_lse_ag_out_rs(
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
 ):
-    """
-    cp_attn_out: [ B, H, D ]
+    """cp_attn_out: [ B, H, D ]
     cp_attn_lse: [ B, H ]
     """
     out, lse = _cp_lse_common(
@@ -288,8 +477,7 @@ def cp_lse_ag_out_ar(
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
 ):
-    """
-    cp_attn_out: [ B, H, D ]
+    """cp_attn_out: [ B, H, D ]
     cp_attn_lse: [ B, H ]
     """
     out, lse = _cp_lse_common(
@@ -317,8 +505,7 @@ def _lse_weighted_combine(
     return_lse: bool = False,
     is_lse_base_on_e: bool = True,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """
-    CPU reference implementation for LSE-weighted combination.
+    """CPU reference implementation for LSE-weighted combination.
 
     This is a pure PyTorch implementation used for testing and validation.
 
@@ -334,6 +521,7 @@ def _lse_weighted_combine(
 
     Returns:
         Combined output [B, H, D], and optionally global LSE [B, H]
+
     """
     N, B, H, D = outputs.shape
 
@@ -415,6 +603,9 @@ def _dcp_a2a_pack_send_kernel(
     out_ptr,
     lse_ptr,
     send_ptr,
+    seq_lens_ptr,
+    query_start_loc_ptr,
+    num_seqs,
     out_stride_B,
     out_stride_H,
     out_stride_D,
@@ -428,10 +619,32 @@ def _dcp_a2a_pack_send_kernel(
     HEAD_DIM: tl.constexpr,
     H_PER_RANK: tl.constexpr,
     LSE_PACK_DIM: tl.constexpr,
+    HAS_MASK: tl.constexpr,
+    NUM_SEQS_POW2: tl.constexpr,
 ):
     batch_idx = tl.program_id(0).to(tl.int64)
     local_head_idx = tl.program_id(1).to(tl.int64)
     d_offsets = tl.arange(0, HEAD_DIM)
+
+    # Empty-shard masking, fused in to avoid a separate per-layer pass over the
+    # LSE. Rows that belong to a request with no local KV shard, and rows past
+    # the end of the batch (CUDA-graph padding), must not contribute to the
+    # combine, which the reduction achieves by giving them an LSE of -inf.
+    row_is_empty = False
+    if HAS_MASK:
+        # searchsorted(query_start_loc[1:], batch_idx, right=True), i.e. the
+        # number of request boundaries at or below this row.
+        seq_offsets = tl.arange(0, NUM_SEQS_POW2)
+        boundaries = tl.load(
+            query_start_loc_ptr + 1 + seq_offsets,
+            mask=seq_offsets < num_seqs,
+            other=2**31 - 1,
+        )
+        seq_idx = tl.sum((boundaries <= batch_idx).to(tl.int32), axis=0)
+        seq_idx = tl.minimum(seq_idx, num_seqs - 1)
+        num_rows = tl.load(query_start_loc_ptr + num_seqs)
+        seq_len = tl.load(seq_lens_ptr + seq_idx)
+        row_is_empty = (batch_idx >= num_rows) | (seq_len == 0)
 
     for rank_idx in tl.static_range(N):
         src_head_idx = rank_idx * H_PER_RANK + local_head_idx
@@ -444,6 +657,8 @@ def _dcp_a2a_pack_send_kernel(
         )
 
         lse_val = tl.load(lse_ptr + batch_idx * lse_stride_B + src_head_idx * lse_stride_H).to(tl.float32)
+        if HAS_MASK:
+            lse_val = tl.where(row_is_empty, -float("inf"), lse_val)
         if LSE_PACK_DIM == 1:
             tl.store(
                 send_ptr + send_base + HEAD_DIM * send_stride_D,
@@ -577,12 +792,21 @@ def _dcp_a2a_pack_send(
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
 ) -> None:
-    mask_dcp_empty_shards_(cp_attn_lse, seq_lens, query_start_loc)
+    # The empty-shard mask is fused into the pack kernel below rather than
+    # applied as a separate pass: the mask is a pure function of seq_lens and
+    # query_start_loc, which are identical for every MLA layer in a step, while
+    # the eager form costs eight launch-bound kernels per layer.
+    has_mask = _validate_dcp_empty_shard_args(seq_lens, query_start_loc)
+    num_seqs = seq_lens.shape[0] if has_mask and seq_lens is not None else 0
+
     grid = (cp_attn_out.shape[0], h_per_rank, 1)
     _dcp_a2a_pack_send_kernel[grid](
         cp_attn_out,
         cp_attn_lse,
         send_buffer,
+        seq_lens,
+        query_start_loc,
+        num_seqs,
         cp_attn_out.stride(0),
         cp_attn_out.stride(1),
         cp_attn_out.stride(2),
@@ -596,6 +820,11 @@ def _dcp_a2a_pack_send(
         HEAD_DIM=head_dim,
         H_PER_RANK=h_per_rank,
         LSE_PACK_DIM=lse_pack_dim,
+        HAS_MASK=has_mask,
+        # Only the arange bound is a constexpr: num_seqs itself is a runtime
+        # argument so the kernel specializes on at most log2(max_num_seqs)
+        # variants instead of one per distinct batch size.
+        NUM_SEQS_POW2=triton.next_power_of_2(max(num_seqs, 1)),
     )
 
 
@@ -652,8 +881,7 @@ def dcp_a2a_lse_reduce(
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """
-    Combine partial attention outputs across DCP ranks using All-to-All.
+    """Combine partial attention outputs across DCP ranks using All-to-All.
 
     The output and LSE are packed into a single output-dtype buffer, sent
     with one All-to-All, then unpacked and combined with exact LSE weighting.
@@ -671,6 +899,7 @@ def dcp_a2a_lse_reduce(
     Returns:
         Combined output [B, H/N, D] (head-scattered)
         If return_lse=True, also returns global_lse [B, H/N]
+
     """
     world_size = cp_group.world_size
 
@@ -716,11 +945,8 @@ def dcp_a2a_lse_reduce(
 
 def get_dcp_workspace_max_num_tokens(aphrodite_config: AphroditeConfig) -> int:
     scheduler_config = aphrodite_config.scheduler_config
-    speculative_config = aphrodite_config.speculative_config
-    speculative_tokens = aphrodite_config.num_speculative_tokens
-    tokens_per_seq = (
-        1 + (2 if speculative_config is not None and speculative_config.parallel_drafting else 1) * speculative_tokens
-    )
+    # num_speculative_tokens also counts a diffusion canvas.
+    tokens_per_seq = max(1 + aphrodite_config.num_speculative_tokens, max_decode_query_len(aphrodite_config))
     return min(
         scheduler_config.max_num_batched_tokens,
         max(
@@ -1167,6 +1393,14 @@ class MLADCPManager:
             is_lse_base_on_e,
             use_pcp,
         )
+        if aphrodite_config.kernel_config.enable_jit_warmup and not self.use_a2a:
+            _CORRECT_ATTN_CP_OUT_KERNEL.register_warmup(
+                aphrodite_config,
+                output_dtype=output_dtype,
+                num_heads=num_heads,
+                head_dim=output_head_dim,
+                is_base_e=is_lse_base_on_e,
+            )
         self.query_gather = (
             None
             if use_pcp
@@ -1318,3 +1552,6 @@ class MLADCPManager:
         local_kv: torch.Tensor,
     ) -> object:
         return self._kv_gather(gathered_kv, local_kv)
+
+
+_CORRECT_ATTN_CP_OUT_KERNEL = CorrectAttnCPOutKernel()

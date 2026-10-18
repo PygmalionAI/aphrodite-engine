@@ -36,7 +36,7 @@ import json
 from collections.abc import Sequence
 
 import regex as re
-from openai.types.responses import ToolChoiceFunction
+from openai.types.responses import ToolChoiceCustom, ToolChoiceFunction
 
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
@@ -139,7 +139,11 @@ class KimiK3ToolParser(ToolParser):
     ) -> ChatCompletionRequest | ResponsesRequest:
         named = isinstance(
             request.tool_choice,
-            (ChatCompletionNamedToolChoiceParam, ToolChoiceFunction),
+            (
+                ChatCompletionNamedToolChoiceParam,
+                ToolChoiceFunction,
+                ToolChoiceCustom,
+            ),
         )
         structured_outputs = getattr(request, "structured_outputs", None)
         has_structural_tag = structured_outputs is not None and structured_outputs.structural_tag is not None

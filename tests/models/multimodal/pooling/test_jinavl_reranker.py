@@ -2,23 +2,17 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import pytest
-import transformers
-from packaging import version
 from transformers import AutoModel
 
 from aphrodite.assets.base import APHRODITE_S3_BUCKET_URL
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
+from aphrodite.renderers.chat_utils import (
     ChatCompletionContentPartImageEmbedsParam,
     ChatCompletionContentPartImageParam,
     ChatCompletionContentPartTextParam,
 )
-from aphrodite.entrypoints.pooling.scoring.typing import ScoreMultiModalParam
 
 from ....conftest import AphroditeRunner, HfRunner
-
-pytestmark = pytest.mark.skip(
-    reason="jinaai/jina-reranker-m0 custom code is incompatible with transformers v5 (missing all_tied_weights_keys)"
-)
 
 MODELS = ["jinaai/jina-reranker-m0"]
 
@@ -30,8 +24,8 @@ MM_PROCESSOR_KWARGS = {
 LIMIT_MM_PER_PROMPT = {"image": 2}
 
 CHECKPOINT_TO_HF_MAPPER = {
-    "visual.": "model.visual.",
-    "model.": "model.language_model.",
+    r"^visual\.": "model.visual.",
+    r"^model\.(?!language_model\.|visual\.)": "model.language_model.",
 }
 
 HANDELSBLATT_IMAGE_URL = f"{APHRODITE_S3_BUCKET_URL}/multimodal_asset/jinavl-handelsblatt-preview.png"
@@ -101,8 +95,7 @@ def _normalize_image(image_val: str) -> str:
 def create_score_multimodal_param(
     content_parts: list[dict],
 ) -> list[ScoreMultiModalParam]:
-    """
-    Create a ScoreMultiModalParam from a list of content dictionaries.
+    """Create a ScoreMultiModalParam from a list of content dictionaries.
 
     Each dict supports the following formats:
     - Text: {'text': 'content'}
@@ -238,17 +231,13 @@ def _run_test(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
-@pytest.mark.skipif(
-    version.parse(transformers.__version__) == version.parse("4.57.5"),
-    reason="Skipped for transformers==4.57.5, https://github.com/huggingface/transformers/issues/43295",
-)
 def test_model_text_image(
     hf_runner,
     aphrodite_runner,
     model: str,
     dtype: str,
 ) -> None:
-    """Visual Documents Reranking"""
+    """Visual Documents Reranking."""
     _run_test(
         hf_runner,
         aphrodite_runner,
@@ -261,17 +250,13 @@ def test_model_text_image(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
-@pytest.mark.skipif(
-    version.parse(transformers.__version__) == version.parse("4.57.5"),
-    reason="Skipped for transformers==4.57.5, https://github.com/huggingface/transformers/issues/43295",
-)
 def test_model_text_text(
     hf_runner,
     aphrodite_runner,
     model: str,
     dtype: str,
 ) -> None:
-    """Textual Documents Reranking"""
+    """Textual Documents Reranking."""
     _run_test(
         hf_runner,
         aphrodite_runner,
@@ -284,17 +269,13 @@ def test_model_text_text(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
-@pytest.mark.skipif(
-    version.parse(transformers.__version__) == version.parse("4.57.5"),
-    reason="Skipped for transformers==4.57.5, https://github.com/huggingface/transformers/issues/43295",
-)
 def test_model_image_text(
     hf_runner,
     aphrodite_runner,
     model: str,
     dtype: str,
 ) -> None:
-    """Image Querying for Textual Documents"""
+    """Image Querying for Textual Documents."""
     _run_test(
         hf_runner,
         aphrodite_runner,
@@ -307,17 +288,13 @@ def test_model_image_text(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
-@pytest.mark.skipif(
-    version.parse(transformers.__version__) == version.parse("4.57.5"),
-    reason="Skipped for transformers==4.57.5, https://github.com/huggingface/transformers/issues/43295",
-)
 def test_model_image_image(
     hf_runner,
     aphrodite_runner,
     model: str,
     dtype: str,
 ) -> None:
-    """Image Querying for Image Documents"""
+    """Image Querying for Image Documents."""
     _run_test(
         hf_runner,
         aphrodite_runner,
@@ -330,17 +307,13 @@ def test_model_image_image(
 
 @pytest.mark.parametrize("model", MODELS)
 @pytest.mark.parametrize("dtype", ["half"])
-@pytest.mark.skipif(
-    version.parse(transformers.__version__) == version.parse("4.57.5"),
-    reason="Skipped for transformers==4.57.5, https://github.com/huggingface/transformers/issues/43295",
-)
 def test_model_text_mixed_documents(
     hf_runner,
     aphrodite_runner,
     model: str,
     dtype: str,
 ) -> None:
-    """Text Query for Mixed Text and Image Documents"""
+    """Text Query for Mixed Text and Image Documents."""
     _run_test(
         hf_runner,
         aphrodite_runner,

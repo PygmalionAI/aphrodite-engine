@@ -23,7 +23,7 @@ import uvloop
 from fastapi import FastAPI, Response
 
 import aphrodite.envs as envs
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_from_args, init_logger
 from aphrodite.utils.system_utils import (
     decorate_logs,
     kill_process_tree,
@@ -154,8 +154,7 @@ async def _probe_endpoint(
     conn_err_failure_threshold: int = 3,
     conn_err_retry_delay: float = 5.0,
 ) -> bool:
-    """
-    Probe /health endpoint for 200 status.
+    """Probe /health endpoint for 200 status.
 
     If there is a connection error, retry every N seconds.
     """
@@ -171,7 +170,7 @@ async def _probe_endpoint(
                 # Aphrodite returns 503 on EngineDeadError, so we should return
                 # immediately if Aphrodite responds with a non-200 status code.
                 return response.status == HTTPStatus.OK
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             # Allow retry of connection errors.
             logger.debug(
                 "Probe attempt %d/%d failed on port %d: %r",
@@ -219,9 +218,9 @@ def _run_rust_aphrodite_dp_server(child_args: argparse.Namespace) -> None:
 
 
 def _run_aphrodite_dp_server(child_args: argparse.Namespace) -> None:
-    """
-    Entrypoint function for the Aphrodite DP Server.
-    """
+    """Entrypoint function for the Aphrodite DP Server."""
+    configure_logging_from_args(child_args)
+
     # Create a fresh process group for the Aphrodite DP Server,
     # so that CTRL-C is propagated cleanly.
     os.setpgrp()
@@ -283,8 +282,7 @@ class DPSupervisor:
                 await supervisor_server_task
 
     async def _start_server(self) -> tuple[uvicorn.Server, asyncio.Task[None]]:
-        """
-        Launch the DPSupervisor HTTP server.
+        """Launch the DPSupervisor HTTP server.
 
         Called only after the Aphrodite DP Servers are ready so that /health
         does not return 503 to external probes while the engines are
@@ -328,8 +326,7 @@ class DPSupervisor:
         return supervisor_server, supervisor_server_task
 
     async def _wait_until_ready(self, monitor_task: asyncio.Task[None]) -> None:
-        """
-        Block until the Aphrodite DP Servers are ready or shutdown is triggered.
+        """Block until the Aphrodite DP Servers are ready or shutdown is triggered.
 
         Returns early if monitoring stops (e.g. a DP Server dies during
         startup), in which case the supervisor server is never started.
@@ -341,14 +338,12 @@ class DPSupervisor:
             await asyncio.sleep(0.05)
 
     def _handle_signal(self, signum: int) -> None:
-        """
-        Signal handler that is added to the event loop.
+        """Signal handler that is added to the event loop.
 
         This catches the SIGTERM from K8s and begins graceful shutdown,
         by setting the _shutdown_event(), which is watched by the main
         coroutine monitoring the Aphrodite DP Servers.
         """
-
         if self._shutdown_event.is_set():
             return
 
@@ -362,9 +357,7 @@ class DPSupervisor:
         self._is_ready = False
 
     def _start_children(self) -> None:
-        """
-        Launch Aphrodite DP Servers on separate GPUs.
-        """
+        """Launch Aphrodite DP Servers on separate GPUs."""
         logger.info("Launching Aphrodite DP Servers")
         context = multiprocessing.get_context("spawn")
         for local_rank in range(self.args.data_parallel_size_local):
@@ -378,8 +371,7 @@ class DPSupervisor:
             self._processes.append(process)
 
     async def _probe_all_children(self) -> None:
-        """
-        Background coroutine: probes all child endpoints on each interval.
+        """Background coroutine: probes all child endpoints on each interval.
 
         Exits when any server becomes unhealthy after being ready, signalling
         _monitor_children to initiate shutdown.
@@ -432,8 +424,7 @@ class DPSupervisor:
                     )
 
     async def _monitor_children(self) -> None:
-        """
-        Main coroutine task that monitors the children Aphrodite servers.
+        """Main coroutine task that monitors the children Aphrodite servers.
 
         Before the Aphrodite servers are /ready:
         - if the pid is dead, we will shut down
@@ -521,4 +512,5 @@ class DPSupervisor:
 
 
 def run_dp_supervisor(args: argparse.Namespace) -> None:
+    configure_logging_from_args(args)
     uvloop.run(DPSupervisor(args).run())

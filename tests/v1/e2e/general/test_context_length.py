@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Tests for Aphrodite `aphrodite/v1/engine/processor.Processor._validate_model_input()`
+"""Tests for Aphrodite `aphrodite/v1/engine/processor.Processor._validate_model_input()`
 handling of maximum context length for decoder models.
 
 This test ensures:
@@ -13,7 +12,7 @@ This test ensures:
 
 import pytest
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from tests.conftest import AphroditeRunner
 from tests.utils import create_new_process_for_each_test
 
@@ -36,7 +35,6 @@ def test_decoder_max_context_length_validation(
 ) -> None:
     """Check Aphrodite decoder model input validation for edge cases where
     the prompt length is (almost) equal to the max model length."""
-
     prompt_ids = [[43] * prompt_len]
 
     with aphrodite_runner(
@@ -74,7 +72,6 @@ def test_auto_fit_max_model_len_rejects_oversized_input(
     the engine auto-fits max_model_len to a small value. The frontend
     must see this reduced value and reject prompts that exceed it,
     rather than accepting them and hanging."""
-
     # Use a small KV cache budget to force auto-fit to a small
     # max_model_len. Pin block_size=16 so the budget is independent
     # of the platform's default block size. One block for this model is
@@ -102,5 +99,5 @@ def test_auto_fit_max_model_len_rejects_oversized_input(
 
         # A prompt longer than the auto-fitted length must be rejected.
         oversized_prompt = [[43] * (auto_fitted_len + 10)]
-        with pytest.raises(APHRODITEValidationError, match="Please reduce the length"):
+        with pytest.raises(AphroditeValidationError, match="Please reduce the length"):
             aphrodite_model.generate_greedy(oversized_prompt, max_tokens=4)

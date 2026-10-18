@@ -6,9 +6,6 @@
 import torch
 
 from aphrodite import _custom_ops as ops
-from aphrodite.model_executor.layers.quantization.utils.marlin_utils import (
-    marlin_sort_g_idx,
-)
 from aphrodite.model_executor.layers.quantization.utils.quant_utils import unpack_cols
 from aphrodite.model_executor.layers.quantization.utils.swordfish_utils import (
     check_swordfish_supports_shape,
@@ -43,12 +40,6 @@ class SwordfishLinearKernel(MPLinearKernel):
                 f"Swordfish requires the sm100 family (compute capability 10.x or 11.x), got {capability}",
             )
 
-        if c.has_g_idx and c.partition_weight_shape[0] != c.full_weight_shape[0]:
-            return (
-                False,
-                "Act reordering with a partial K (row-parallel TP) not supported by Swordfish",
-            )
-
         supported_types = query_swordfish_supported_quant_types(c.zero_points)
         if c.weight_type not in supported_types:
             return (
@@ -70,15 +61,6 @@ class SwordfishLinearKernel(MPLinearKernel):
         c = self.config
         size_k, size_n = c.partition_weight_shape
 
-        # Act-order rows sort by group at prepack; scales then apply in the
-        # plain grouped order and only the activation columns need the sort
-        # permutation at run time.
-        if c.has_g_idx:
-            assert self.w_gidx_name is not None
-            g_idx, g_idx_sort_indices = marlin_sort_g_idx(getattr(layer, self.w_gidx_name))
-            self._transform_param(layer, self.w_gidx_name, lambda _: g_idx)
-            layer.g_idx_sort_indices = g_idx_sort_indices
-
         def transform_w_q(x):
             assert isinstance(x, BaseAphroditeParameter)
             permute_param_layout_(x, input_dim=0, output_dim=1, packed_dim=0)
@@ -87,7 +69,6 @@ class SwordfishLinearKernel(MPLinearKernel):
                 size_k,
                 size_n,
                 c.weight_type.size_bits,
-                perm=layer.g_idx_sort_indices if c.has_g_idx else None,
             )
             return x
 
@@ -132,7 +113,7 @@ class SwordfishLinearKernel(MPLinearKernel):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         c = self.config
-        w_q, w_s, w_zp, _ = self._get_weight_params(layer)
+        w_q, w_s, w_zp = self._get_weight_params(layer)
         # Symmetric GPTQ checkpoints still materialize a qzeros param; only
         # zero-point configs transformed it into the (8 - zp) * s tensor.
         if not c.zero_points:
@@ -152,7 +133,6 @@ class SwordfishLinearKernel(MPLinearKernel):
             c.partition_weight_shape[1],
             group_zps=w_zp,
             num_bits=c.weight_type.size_bits,
-            perm=layer.g_idx_sort_indices if c.has_g_idx else None,
         )
 
         if bias is not None:

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-End-to-end accuracy test for GPT-OSS model quantization.
+"""End-to-end accuracy test for GPT-OSS model quantization.
 
 Config:
     Task:   gsm8k_platinum
@@ -17,7 +16,6 @@ import importlib.util
 from dataclasses import dataclass
 
 import huggingface_hub
-import lm_eval
 import pytest
 import torch
 from packaging import version
@@ -41,6 +39,7 @@ from aphrodite.model_executor.layers.fused_moe.oracle.mxfp4 import (
 )
 from aphrodite.platforms import current_platform
 from aphrodite.utils.torch_utils import set_random_seed
+from tests.quantization.lm_eval_utils import evaluate_sonar
 
 if current_platform.is_rocm():
     from aphrodite.platforms.rocm import on_gfx950, on_gfx1250
@@ -131,9 +130,8 @@ def test_gpt_oss_attention_quantization(
         "num_fewshot": 5,
     }
 
-    lm_eval_out = lm_eval.simple_evaluate(
-        model="aphrodite",
-        model_args=model_args,
+    lm_eval_out = evaluate_sonar(
+        model_args,
         tasks="gsm8k_platinum",
         batch_size="auto",
         **extra_run_kwargs,
@@ -165,8 +163,7 @@ def test_aiter_mxfp4_moe_ignores_padded_rows(
     monkeypatch: pytest.MonkeyPatch,
     dist_init,
 ) -> None:
-    """
-    Garbage in cudagraph padding rows must not reach the unpadded outputs.
+    """Garbage in cudagraph padding rows must not reach the unpadded outputs.
 
     A cudagraph replay of a size-`TOKENS_PADDED` graph driven by
     `TOKENS_UNPADDED` real tokens leaves the trailing padding row containing

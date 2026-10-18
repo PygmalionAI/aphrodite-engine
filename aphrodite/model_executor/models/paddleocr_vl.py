@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-from transformers import BaseImageProcessor, BatchFeature, PretrainedConfig
+from transformers import BaseImageProcessor, BatchFeature, PreTrainedConfig
 from transformers.activations import GELUActivation
 from transformers.image_utils import ChannelDimension
 from transformers.modeling_outputs import (
@@ -32,7 +32,7 @@ from transformers.modeling_outputs import (
 from transformers.utils import torch_int
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.distributed import parallel_state
 from aphrodite.distributed import utils as dist_utils
 from aphrodite.inputs import MultiModalDataDict
@@ -99,7 +99,6 @@ def smart_resize(
     3. The aspect ratio of the image is maintained as closely as possible.
 
     """
-
     if height < factor:
         width = round((width * factor) / height)
         height = factor
@@ -223,59 +222,49 @@ class PaddleOCRVLDummyInputsBuilder(BaseDummyInputsBuilder[PaddleOCRVLProcessing
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_images = mm_counts.get("image", 0)
-
         max_image_size = self.info.get_image_size_with_most_features()
-        image_overrides = mm_options.get("image")
 
         return {
             "image": self._get_dummy_images(
                 width=max_image_size.width,
                 height=max_image_size.height,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             )
         }
 
 
 class PaddleOCRVLMultiModalProcessor(BaseMultiModalProcessor[PaddleOCRVLProcessingInfo]):
-    def _apply_hf_processor_main(
+    def _get_hf_mm_text(self, mm_counts: Mapping[str, int]) -> str:
+        return self.dummy_inputs.get_dummy_text(mm_counts)
+
+    def _call_hf_processor(
         self,
-        mm_items: MultiModalDataItems,
-        hf_processor_mm_kwargs: Mapping[str, object],
+        hf_data: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        valid_mm_items = mm_items.select({k for k, c in mm_items.get_all_counts().items() if c > 0})
-        mm_data, passthrough_data = self._get_hf_mm_data(valid_mm_items)
-
-        if not mm_data:
-            return BatchFeature(dict(passthrough_data))
-
-        prompt_text = self.dummy_inputs.get_dummy_text(mm_items.get_all_counts())
-
-        final_mm_kwargs = dict(hf_processor_mm_kwargs or {})
+        final_mm_kwargs = dict(hf_kwargs or {})
         final_mm_kwargs.setdefault("images_kwargs", {})
         # Aphrodite use PIL.Image, always set channel_last
         final_mm_kwargs["input_data_format"] = ChannelDimension.LAST
-        processed_data = self.info.ctx.call_hf_processor(
+        return self.info.ctx.call_hf_processor(
             self.info.get_hf_processor(**final_mm_kwargs),
-            dict(text=prompt_text, **mm_data),
-            hf_processor_mm_kwargs,
+            hf_data,
+            hf_kwargs,
         )
-        num_patches_per_image = processed_data["image_grid_thw"].prod(-1)
-        processed_data["pixel_values"] = processed_data["pixel_values"].split(num_patches_per_image.tolist())
-        processed_data.update(passthrough_data)
-
-        return processed_data
 
     def _get_mm_fields_config(
         self,
         hf_inputs: BatchFeature,
         hf_processor_mm_kwargs: Mapping[str, object],
     ) -> Mapping[str, MultiModalFieldConfig]:
+        image_grid_thw = hf_inputs.get("image_grid_thw", torch.empty((0, 3)))
+        image_grid_sizes = image_grid_thw.prod(-1)
+
         return dict(
-            pixel_values=MultiModalFieldConfig.batched("image"),
+            pixel_values=MultiModalFieldConfig.flat_from_sizes("image", image_grid_sizes),
             image_grid_thw=MultiModalFieldConfig.batched("image", keep_on_cpu=True),
         )
 
@@ -314,8 +303,8 @@ class PaddleOCRVLMultiModalProcessor(BaseMultiModalProcessor[PaddleOCRVLProcessi
 class Projector(nn.Module):
     def __init__(
         self,
-        text_config: PretrainedConfig,
-        vision_config: PretrainedConfig,
+        text_config: PreTrainedConfig,
+        vision_config: PreTrainedConfig,
         prefix: str = "",
     ):
         super().__init__()
@@ -337,12 +326,12 @@ class Projector(nn.Module):
     ) -> torch.Tensor:
         m1, m2 = self.merge_kernel_size
         if isinstance(image_features, (list, tuple)):
-            processed_features = list()
-            for image_feature, image_grid in zip(image_features, image_grid_thw):
-                image_feature = self.pre_norm(image_feature)
-                t, h, w = image_grid
-
-                image_feature = rearrange(
+            # Norm and MLP are per-token, so run them once over all images;
+            # only the 2x2 merge depends on each image's grid.
+            sizes = [image_feature.shape[0] for image_feature in image_features]
+            normed_features = self.pre_norm(torch.cat(image_features)).split(sizes)
+            merged_features = [
+                rearrange(
                     image_feature,
                     "(t h p1 w p2) d -> (t h w) (p1 p2 d)",
                     t=t,
@@ -351,12 +340,13 @@ class Projector(nn.Module):
                     w=w // m2,
                     p2=m2,
                 )
-                hidden_states = self.linear_1(image_feature)
-                hidden_states = self.act(hidden_states)
-                hidden_states = self.linear_2(hidden_states)
-                processed_features.append(hidden_states)
+                for image_feature, (t, h, w) in zip(normed_features, image_grid_thw)
+            ]
+            hidden_states = self.linear_1(torch.cat(merged_features))
+            hidden_states = self.act(hidden_states)
+            hidden_states = self.linear_2(hidden_states)
 
-            return processed_features
+            return hidden_states.split([f.shape[0] for f in merged_features])
 
         dims = image_features.shape[:-1]
         dim = image_features.shape[-1]
@@ -373,7 +363,7 @@ class PaddleOCRImagePixelInputs(TensorSchema):
     type: Literal["pixel_values"]
     pixel_values: Annotated[
         torch.Tensor,
-        TensorShape("bn", "p", 3, "patch_size", "patch_size", dynamic_dims={"p"}),
+        TensorShape("np", 3, "patch_size", "patch_size"),
     ]
     image_grid_thw: Annotated[
         torch.Tensor,
@@ -382,7 +372,7 @@ class PaddleOCRImagePixelInputs(TensorSchema):
 
 
 class SiglipVisionEmbeddings(nn.Module):
-    def __init__(self, config: PretrainedConfig):
+    def __init__(self, config: PreTrainedConfig):
         super().__init__()
         self.config = config
         self.embed_dim = config.hidden_size
@@ -442,25 +432,6 @@ class SiglipVisionEmbeddings(nn.Module):
 
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
-
-    def fetch_position_embedding_lfu_cache(self, embeddings: torch.Tensor, h: int, w: int, max_cache: int = 20):
-        grid = (h, w)
-        if grid in self.cache_position_embedding:
-            self.cache_position_count[grid] += 1
-            return self.cache_position_embedding[grid]
-
-        if len(self.cache_position_embedding) >= max_cache:
-            min_hit_grid = min(
-                self.cache_position_count,
-                key=self.cache_position_count.__getitem__,
-            )
-            self.cache_position_count.pop(min_hit_grid)
-            self.cache_position_embedding.pop(min_hit_grid)
-
-        position_embedding = self.interpolate_pos_encoding(embeddings, h, w, True)
-        self.cache_position_count[grid] = 1
-        self.cache_position_embedding[grid] = position_embedding
-        return position_embedding
 
     def forward(
         self,
@@ -645,7 +616,7 @@ class SigLIPRotaryEmbedding(nn.Module):
 class SiglipEncoderLayer(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
@@ -698,7 +669,7 @@ class SiglipEncoderLayer(nn.Module):
 class SiglipEncoder(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
@@ -773,10 +744,10 @@ class SiglipEncoder(nn.Module):
         if cu_seqlens is None:
             raise ValueError("cu_seqlens cannot be None for SiglipEncoder.")
         if not isinstance(cu_seqlens, torch.Tensor):
-            cu_seqlens = async_tensor_h2d(cu_seqlens, dtype=torch.int32, device=device)
-        else:
-            cu_seqlens = cu_seqlens.to(device=device, non_blocking=True)
+            cu_seqlens = torch.tensor(cu_seqlens, dtype=torch.int32)
 
+        # Computed before the H2D copy: the attention wrappers call `.item()`
+        # on it, which would sync on every layer for a device tensor.
         max_seqlen = None
         if self.attn_backend in {
             AttentionBackendEnum.FLASH_ATTN,
@@ -784,6 +755,11 @@ class SiglipEncoder(nn.Module):
             AttentionBackendEnum.TRITON_ATTN,
         }:
             max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
+
+        if cu_seqlens.is_cpu:
+            cu_seqlens = async_tensor_h2d(cu_seqlens, dtype=torch.int32, device=device)
+        else:
+            cu_seqlens = cu_seqlens.to(device=device, non_blocking=True)
 
         hidden_states = inputs_embeds
         for encoder_layer in self.layers:
@@ -799,7 +775,7 @@ class SiglipEncoder(nn.Module):
 class SiglipVisionTransformer(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ):
@@ -970,14 +946,14 @@ class PaddleOCRVLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
         return self.language_model.compute_logits(hidden_states)
 
     def iter_mm_grid_thw(self, mm_features: list[MultiModalFeatureSpec]) -> Iterator[tuple[int, int, int, int, float]]:
-        """
-        Iterate over multimodal features and yield grid information.
+        """Iterate over multimodal features and yield grid information.
 
         Args:
             mm_features: List of multimodal feature specifications
 
         Yields:
             Tuple of (offset, grid_t, grid_h, grid_w, t_factor) for each frame/image
+
         """
         spatial_merge_size = self.config.vision_config.spatial_merge_size
         tokens_per_second = getattr(self.config.vision_config, "tokens_per_second", 1.0)
@@ -1074,49 +1050,39 @@ class PaddleOCRVLForConditionalGeneration(nn.Module, SupportsMultiModal, Support
 
         return self.language_model(input_ids, positions, intermediate_tensors, inputs_embeds)
 
-    def encode_image(self, pixel_values: torch.Tensor, image_grid_thw: torch.Tensor) -> torch.Tensor:
+    def encode_image(
+        self,
+        pixel_values: torch.Tensor,
+        image_grid_thw: list[tuple[int, int, int]],
+    ) -> torch.Tensor:
+        """Encode the flat patches of all images in one vision tower call."""
         pixel_values = pixel_values.type(self.visual.dtype)
-        siglip_position_ids = list()
-        image_grid_hws = list()
-        cu_seqlens = [0]
+        seq_lens = [math.prod(grid) for grid in image_grid_thw]
 
-        thw_tuple = tuple(image_grid_thw.tolist())
-        numel = np.prod(thw_tuple)
-        image_grid_hws.append(thw_tuple)
-        image_position_ids = torch.arange(numel) % np.prod(thw_tuple[1:])
-        siglip_position_ids.append(image_position_ids)
-        cu_seqlens.append(cu_seqlens[-1] + numel)
-
-        # Both are built on the host; concat straight into a pinned buffer
-        # so the H2D copy stays non-blocking.
+        # Built on the host; concat straight into a pinned buffer so the
+        # H2D copy stays non-blocking.
         siglip_position_ids = torch.concat(
-            siglip_position_ids,
+            [torch.arange(seq_len) % (h * w) for seq_len, (_, h, w) in zip(seq_lens, image_grid_thw)],
             dim=0,
-            out=torch.empty(
-                sum(t.numel() for t in siglip_position_ids),
-                dtype=torch.int64,
-                pin_memory=PIN_MEMORY,
-            ),
+            out=torch.empty(sum(seq_lens), dtype=torch.int64, pin_memory=PIN_MEMORY),
         ).to(pixel_values.device, non_blocking=True)
-        cu_seqlens = async_tensor_h2d(cu_seqlens, dtype=torch.int32, device=pixel_values.device)
+        # One segment per image so that images never attend to each other.
+        cu_seqlens = torch.from_numpy(np.cumsum([0, *seq_lens], dtype=np.int32))
 
-        vision_outputs = self.visual(
+        return self.visual(
             pixel_values=pixel_values,
-            image_grid_thw=image_grid_hws,
+            image_grid_thw=image_grid_thw,
             position_ids=siglip_position_ids,
             interpolate_pos_encoding=True,
             cu_seqlens=cu_seqlens,
         )
-        return vision_outputs
 
     def _process_image_input(self, image_input: PaddleOCRImagePixelInputs) -> MultiModalEmbeddings:
-        pixel_values = image_input.pixel_values
         image_grid_thw = image_input.image_grid_thw
-        vision_outputs = tuple(
-            self.encode_image(pixel, grid).squeeze(0) for pixel, grid in zip(pixel_values, image_grid_thw)
-        )
-        image_embeds = self.mlp_AR(vision_outputs, image_grid_thw)
-        return image_embeds
+        grids = [tuple(grid) for grid in image_grid_thw.tolist()]
+        vision_outputs = self.encode_image(image_input.pixel_values, grids).squeeze(0)
+        vision_outputs = vision_outputs.split([math.prod(grid) for grid in grids])
+        return self.mlp_AR(vision_outputs, image_grid_thw)
 
     def embed_multimodal(self, **kwargs) -> MultiModalEmbeddings:
         image_input = self._parse_and_validate_image_input(**kwargs)

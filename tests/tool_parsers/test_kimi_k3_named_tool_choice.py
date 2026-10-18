@@ -8,6 +8,7 @@ import pytest
 from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
 )
+from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.sampling_params import StructuredOutputsParams
 
@@ -58,3 +59,24 @@ def test_named_choice_allowed_with_structural_tag():
 def test_named_choice_rejected_without_structural_tag():
     with pytest.raises(AphroditeValidationError):
         _parser().adjust_request(_request(with_tag=False))
+
+
+def _custom_request(with_tag: bool) -> ResponsesRequest:
+    req = ResponsesRequest(
+        input="hi",
+        tools=[{"type": "custom", "name": "emit_command"}],
+        tool_choice={"type": "custom", "name": "emit_command"},
+    )
+    if with_tag:
+        req.structured_outputs = StructuredOutputsParams(structural_tag='{"type": "structural_tag", "format": {}}')
+    return req
+
+
+def test_named_custom_choice_allowed_with_structural_tag():
+    req = _parser().adjust_request(_custom_request(with_tag=True))
+    assert req.skip_special_tokens is False
+
+
+def test_named_custom_choice_rejected_without_structural_tag():
+    with pytest.raises(AphroditeValidationError):
+        _parser().adjust_request(_custom_request(with_tag=False))

@@ -24,10 +24,7 @@ def has_ec_transfer() -> bool:
 
 
 def ensure_ec_transfer_initialized(aphrodite_config: "AphroditeConfig") -> None:
-    """
-    Initialize EC cache connector.
-    """
-
+    """Initialize EC cache connector."""
     global _EC_CONNECTOR_AGENT
 
     if aphrodite_config.ec_transfer_config is None:

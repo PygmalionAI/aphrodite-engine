@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Test modular OAI Triton MoE
-"""
+"""Test modular OAI Triton MoE."""
 
 from __future__ import annotations
 
@@ -11,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from aphrodite.model_executor.layers.fused_moe.activation import MoEActivation
-from aphrodite.utils.import_utils import has_triton_kernels
+from aphrodite.utils.import_utils import get_triton_kernels_version, has_triton_kernels
 from tests.utils import wait_for_gpu_memory_to_clear
 
 if not has_triton_kernels():
@@ -20,11 +18,14 @@ if not has_triton_kernels():
         allow_module_level=True,
     )
 
-from triton_kernels.matmul_ogs import FlexCtx, PrecisionConfig
+if get_triton_kernels_version() == "3.8":
+    # 3.8: matmul_ogs -> matmul
+    from triton_kernels.matmul import FlexCtx, PrecisionConfig
+else:
+    from triton_kernels.matmul_ogs import FlexCtx, PrecisionConfig
 from triton_kernels.numerics import InFlexData
 from triton_kernels.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
 from triton_kernels.tensor import FP4, convert_layout, wrap_torch_tensor
-from triton_kernels.tensor_details import layout
 from triton_kernels.testing import assert_close
 
 from aphrodite.config import AphroditeConfig, set_current_aphrodite_config
@@ -37,11 +38,12 @@ from aphrodite.model_executor.layers.fused_moe.experts.gpt_oss_triton_kernels_mo
     UnfusedOAITritonExperts,
 )
 from aphrodite.model_executor.layers.fused_moe.modular_kernel import FusedMoEKernel
+from aphrodite.model_executor.layers.quantization.utils.mxfp4_utils import mx_scale_kwargs
 from aphrodite.platforms import current_platform
 from aphrodite.utils.math_utils import round_up
 from aphrodite.utils.torch_utils import set_random_seed
 
-from .utils import make_dummy_moe_config, shuffle_weight
+from .utils import make_dummy_moe_config, mxfp4_w_layouts, shuffle_weight
 
 MNK = [
     (1, 512, 384),
@@ -132,10 +134,12 @@ def make_weights(dtype, k, n, e):
     w2 = w2[..., :n, :k]
 
     num_warps = 8
-    w_layout, w_layout_opts = layout.make_default_matmul_mxfp4_w_layout(mx_axis=1)
-    w_scale_layout, w_scale_layout_opts = layout.make_default_matmul_mxfp4_w_scale_layout(
-        mx_axis=1, num_warps=num_warps
-    )
+    (
+        w_layout,
+        w_layout_opts,
+        w_scale_layout,
+        w_scale_layout_opts,
+    ) = mxfp4_w_layouts(mx_axis=1, num_warps=num_warps)
 
     w1_tri = convert_layout(wrap_torch_tensor(w1_tri, FP4), w_layout, **w_layout_opts)
     w1_scale_tri = convert_layout(
@@ -151,8 +155,8 @@ def make_weights(dtype, k, n, e):
         **w_scale_layout_opts,
     )
 
-    w1_precision_config = PrecisionConfig(weight_scale=w1_scale_tri, flex_ctx=FlexCtx(rhs_data=InFlexData()))
-    w2_precision_config = PrecisionConfig(weight_scale=w2_scale_tri, flex_ctx=FlexCtx(rhs_data=InFlexData()))
+    w1_precision_config = PrecisionConfig(**mx_scale_kwargs(w1_scale_tri), flex_ctx=FlexCtx(rhs_data=InFlexData()))
+    w2_precision_config = PrecisionConfig(**mx_scale_kwargs(w2_scale_tri), flex_ctx=FlexCtx(rhs_data=InFlexData()))
 
     return (
         w1,

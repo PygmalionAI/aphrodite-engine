@@ -26,7 +26,7 @@ fp8_only = pytest.mark.skipif(not current_platform.supports_fp8(), reason="ROCm 
 
 ENV_DEFAULTS = {
     "APHRODITE_ROCM_FP8_PADDING": True,
-    "APHRODITE_ROCM_USE_AITER_FP8BMM": True,
+    "APHRODITE_ROCM_USE_AITER_FP8BMM": False,
     "APHRODITE_ROCM_FP8_MFMA_PAGE_ATTN": False,
 }
 

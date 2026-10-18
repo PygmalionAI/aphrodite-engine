@@ -34,8 +34,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from aphrodite.modeling.layers.rotary_embedding import get_rope
 
+from aphrodite.model_executor.layers.rotary_embedding import get_rope
 from aphrodite.platforms import current_platform
 from aphrodite.transformers_utils.config import get_config
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser

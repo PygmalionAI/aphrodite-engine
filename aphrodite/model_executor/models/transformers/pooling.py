@@ -19,6 +19,7 @@
 from typing import TYPE_CHECKING
 
 import torch
+import torch.nn as nn
 from transformers import AutoModelForSequenceClassification
 
 from aphrodite.config.utils import getattr_iter
@@ -26,11 +27,25 @@ from aphrodite.model_executor.layers.pooler import DispatchPooler
 from aphrodite.model_executor.models.interfaces import SupportsCrossEncoding
 from aphrodite.model_executor.models.interfaces_base import AphroditeModelForPooling
 
+from .base import Base
+
 if TYPE_CHECKING:
     from aphrodite.config import AphroditeConfig
 
 
-class EmbeddingMixin(AphroditeModelForPooling):
+class ClassifierWithReshape(nn.Module):
+    """Token extraction has already been applied in `pooler.pooling`.
+
+    Add dim to match expected input shape of `classifier.forward`.
+    """
+
+    def forward(self, *args, **kwargs):
+        if len(args) > 0:
+            args = (args[0].unsqueeze(1), *args[1:])
+        return super().forward(*args, **kwargs)
+
+
+class EmbeddingMixin(AphroditeModelForPooling, Base):
     default_seq_pooling_type = "CLS"
 
     def __init__(self, *, aphrodite_config: "AphroditeConfig", prefix: str = ""):
@@ -43,7 +58,7 @@ class EmbeddingMixin(AphroditeModelForPooling):
         self.pooler = DispatchPooler.for_embedding(pooler_config)
 
 
-class SequenceClassificationMixin(SupportsCrossEncoding, AphroditeModelForPooling):
+class SequenceClassificationMixin(SupportsCrossEncoding, AphroditeModelForPooling, Base):
     default_seq_pooling_type = "CLS"
 
     def __init__(self, *, aphrodite_config: "AphroditeConfig", prefix: str = ""):
@@ -78,18 +93,13 @@ class SequenceClassificationMixin(SupportsCrossEncoding, AphroditeModelForPoolin
             )
         self.init_parameters(self.classifier, dtype=self.model_config.head_dtype)
 
-        class ClassifierWithReshape(self.classifier.__class__):
-            """
-            Token extraction has already been applied in `pooler.pooling`.
-            Add dim to match expected input shape of `classifier.forward`.
-            """
-
-            def forward(self, *args, **kwargs):
-                if len(args) > 0:
-                    args = (args[0].unsqueeze(1), *args[1:])
-                return super().forward(*args, **kwargs)
-
-        self.classifier.__class__ = ClassifierWithReshape
+        # Order `ClassifierWithReshape` ahead of the classifier's own class so that
+        # its `super().forward(...)` reaches the original implementation.
+        self.classifier.__class__ = type(
+            "ClassifierWithReshape",
+            (ClassifierWithReshape, type(self.classifier)),
+            {},
+        )
 
         self.pooler = DispatchPooler.for_seq_cls(
             pooler_config,

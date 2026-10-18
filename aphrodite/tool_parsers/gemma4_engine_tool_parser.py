@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from openai.types.responses import ToolChoiceFunction
+from openai.types.responses import ToolChoiceCustom, ToolChoiceFunction
 
 from aphrodite.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionNamedToolChoiceParam,
@@ -28,7 +28,14 @@ class Gemma4EngineToolParser(Gemma4ParserToolAdapter):  # type: ignore[valid-typ
         """
         if request.tools:
             tc = request.tool_choice
-            if tc == "required" or isinstance(tc, (ChatCompletionNamedToolChoiceParam, ToolChoiceFunction)):
+            if tc == "required" or isinstance(
+                tc,
+                (
+                    ChatCompletionNamedToolChoiceParam,
+                    ToolChoiceFunction,
+                    ToolChoiceCustom,
+                ),
+            ):
                 request.skip_special_tokens = False
                 return request
         return super().adjust_request(request)

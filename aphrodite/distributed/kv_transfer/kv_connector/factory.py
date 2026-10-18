@@ -85,6 +85,7 @@ class KVConnectorFactory:
 
         Returns:
             The connector class.
+
         """
         if connector_name not in cls._registry:
             raise ValueError(f"Connector '{connector_name}' is not registered.")
@@ -189,6 +190,12 @@ KVConnectorFactory.register_connector(
     "MultiConnector",
     "aphrodite.distributed.kv_transfer.kv_connector.v1.multi_connector",
     "MultiConnector",
+)
+
+KVConnectorFactory.register_connector(
+    "HiSparseConnector",
+    "aphrodite.distributed.kv_transfer.kv_connector.v1.hisparse.connector",
+    "HiSparseConnector",
 )
 
 KVConnectorFactory.register_connector(

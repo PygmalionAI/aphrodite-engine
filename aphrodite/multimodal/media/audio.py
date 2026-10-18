@@ -11,10 +11,11 @@ import pybase64
 import torch
 
 import aphrodite.envs as envs
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.multimodal.audio import resample_audio_pyav
 from aphrodite.utils.import_utils import PlaceholderModule
+from aphrodite.utils.math_utils import cdiv
 from aphrodite.utils.mem_constants import MiB_bytes
 from aphrodite.utils.serial_utils import tensor2base64
 from aphrodite.utils.sparse_utils import (
@@ -22,7 +23,7 @@ from aphrodite.utils.sparse_utils import (
     safe_to_dense,
 )
 
-from .base import MediaIO
+from .base import MediaDecodedBudget, MediaIO
 
 logger = init_logger(__name__)
 
@@ -73,6 +74,9 @@ _TORCHCODEC_UNAVAILABLE_MSG = (
 # over-long stream is rejected rather than truncated to the limit.
 _DURATION_GUARD_MARGIN_S = 1.0
 
+# Largest Vorbis block size in native-rate samples
+_VORBIS_MAX_BLOCK_SAMPLES = 8192
+
 
 def load_audio_pyav(
     path: BytesIO | Path | str,
@@ -91,6 +95,10 @@ def load_audio_pyav(
     Args:
         path: A :class:`~io.BytesIO` buffer, a filesystem
             :class:`~pathlib.Path`, or a string path.
+        sr: Target sample rate, or None to keep the native rate.
+        mono: Whether to average the channels down to mono.
+        max_decode_bytes: If set, abort decoding once this many bytes have
+            been read from the source.
         max_duration_s: If set, abort decoding once the accumulated
             sample count exceeds this many seconds of audio.  Prevents
             decompression-bomb attacks where a small compressed file
@@ -99,6 +107,7 @@ def load_audio_pyav(
     Returns:
         ``(waveform, sample_rate)`` where *waveform* is a 1-D float32
         NumPy array and *sample_rate* is the native sample rate in Hz.
+
     """
     try:
         container = av.open(path)
@@ -201,7 +210,7 @@ def load_audio_soundfile(
     max_duration_s: float | None = None,
     max_decode_bytes: int | None = None,
 ) -> tuple[np.ndarray, int]:
-    """Load audio via soundfile"""
+    """Load audio via soundfile."""
     with soundfile.SoundFile(path) as f:
         native_sr = f.samplerate
         if max_duration_s is not None:
@@ -266,6 +275,7 @@ def load_audio_torchcodec(
         ``(waveform, sample_rate)`` where *waveform* is a float32 NumPy
         array (1-D when ``mono=True``) and *sample_rate* is the output
         sample rate in Hz.
+
     """
     if AudioDecoder is None:
         # Unify "torchcodec not installed" and "system ffmpeg missing" into
@@ -340,6 +350,16 @@ def load_audio_torchcodec(
             "audio or video file (e.g. a complete WAV, MP3, or MP4)."
         ) from e
 
+    # FFmpeg < 5.0 misses Ogg end_trimming, leaving up to one Vorbis block of
+    # padding at the tail; we need to trim for valid audio length.
+    if metadata.codec == "vorbis" and metadata.duration_seconds is not None:
+        expected_samples = round(metadata.duration_seconds * samples.sample_rate)
+        padding = samples.data.shape[-1] - expected_samples
+        native_sr = metadata.sample_rate or samples.sample_rate
+        max_padding = cdiv(_VORBIS_MAX_BLOCK_SAMPLES * samples.sample_rate, native_sr)
+        if 0 < padding <= max_padding:
+            samples.data = samples.data[..., :expected_samples]
+
     # Authoritative post-decode checks: the metadata estimates above can be
     # bypassed by a container that lies about its duration or size.
     if max_duration_s is not None:
@@ -394,10 +414,17 @@ def load_audio(
     """Load audio using the selected decoding backend.
 
     Args:
+        path: Audio file path or in-memory buffer.
+        sr: Target sample rate, or None to keep the native rate.
+        mono: Whether to downmix to a single channel.
+        max_duration_s: Reject audio longer than this many seconds.
+        max_decode_bytes: Reject audio that would decode to more than this
+            many bytes.
         backend: One of ``AUDIO_BACKENDS``. ``None`` (default) selects
             ``"auto"``, which tries torchcodec, then falls back to the
             soundfile → PyAV chain; the other values select a single
             backend with no fallback.
+
     """
     backend = backend or "auto"
     if backend not in AUDIO_BACKENDS:
@@ -412,10 +439,9 @@ def load_audio(
             max_decode_bytes=max_decode_bytes,
         )
 
-    # "auto": torchcodec → soundfile → PyAV. Each backend is called by its
-    # bare name so tests that monkeypatch it take effect. Only an ImportError
-    # (backend missing) or, for soundfile, an unsupported-format error defers
-    # to the next; any other error (decode failure, guard ValueError) raises.
+    # "auto": torchcodec → soundfile → PyAV, each called by its bare name so
+    # monkeypatched tests take effect. Only ImportError (or, for soundfile, an
+    # unsupported-format error) defers to the next backend; anything else raises.
     if isinstance(path, BytesIO):
         path.seek(0)
     try:
@@ -427,8 +453,7 @@ def load_audio(
             max_decode_bytes=max_decode_bytes,
         )
     except ImportError as exc:
-        # Decode errors don't defer: torchcodec is FFmpeg-based like PyAV, so
-        # retrying would just fail the same way.
+        # Decode errors don't defer: FFmpeg-based PyAV would fail the same way.
         logger.warning("torchcodec unavailable (%r); falling back to soundfile/PyAV.", exc)
 
     if isinstance(path, BytesIO):
@@ -479,8 +504,9 @@ class AudioMediaIO(MediaIO[tuple[npt.NDArray, float]]):
     error handling.
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, *, decoded_budget: MediaDecodedBudget | None = None, **kwargs) -> None:
         super().__init__()
+        self.decoded_budget = decoded_budget
 
         # Allow per-server override of the audio decoding backend, e.g.:
         #   --media-io-kwargs '{"audio": {"audio_backend": "torchcodec"}}'
@@ -505,7 +531,7 @@ class AudioMediaIO(MediaIO[tuple[npt.NDArray, float]]):
     def _validate_encoded_size(self, size: int) -> None:
         max_bytes = self.get_max_bytes()
         if size > max_bytes:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Maximum file size exceeded",
                 parameter="audio_filesize_mb",
                 value=size / MiB_bytes,
@@ -513,13 +539,39 @@ class AudioMediaIO(MediaIO[tuple[npt.NDArray, float]]):
 
     def load_bytes(self, data: bytes) -> tuple[npt.NDArray, float]:
         self._validate_encoded_size(len(data))
-        return load_audio(
-            BytesIO(data),
-            sr=None,
-            max_duration_s=envs.APHRODITE_MAX_AUDIO_DECODE_DURATION_S,
-            max_decode_bytes=envs.APHRODITE_MAX_AUDIO_DECODE_BYTES,
-            backend=self.audio_backend,
-        )
+        return self._load_with_budget(BytesIO(data))
+
+    def _load_with_budget(self, source: BytesIO | Path) -> tuple[npt.NDArray, float]:
+        budget = self.decoded_budget
+        if budget is None:
+            return load_audio(
+                source,
+                sr=None,
+                max_duration_s=envs.APHRODITE_MAX_AUDIO_DECODE_DURATION_S,
+                max_decode_bytes=envs.APHRODITE_MAX_AUDIO_DECODE_BYTES,
+                backend=self.audio_backend,
+            )
+
+        max_decode_bytes = envs.APHRODITE_MAX_AUDIO_DECODE_BYTES
+        reserved = budget.reserve(max_decode_bytes)
+        decoded_bytes = 0
+        try:
+            try:
+                audio = load_audio(
+                    source,
+                    sr=None,
+                    max_duration_s=envs.APHRODITE_MAX_AUDIO_DECODE_DURATION_S,
+                    max_decode_bytes=reserved,
+                    backend=self.audio_backend,
+                )
+            except ValueError as exc:
+                if reserved < max_decode_bytes and "APHRODITE_MAX_AUDIO_DECODE_BYTES" in str(exc):
+                    raise ValueError("Request decoded media exceeds APHRODITE_MAX_MEDIA_REQUEST_DECODE_BYTES.") from exc
+                raise
+            decoded_bytes = audio[0].nbytes
+            return audio
+        finally:
+            budget.settle(reserved, decoded_bytes)
 
     def load_base64(
         self,
@@ -528,7 +580,7 @@ class AudioMediaIO(MediaIO[tuple[npt.NDArray, float]]):
     ) -> tuple[npt.NDArray, float]:
         max_encoded_chars = 4 * ((self.get_max_bytes() + 2) // 3)
         if len(data) > max_encoded_chars:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Maximum file size exceeded",
                 parameter="audio_filesize_mb",
                 value=(len(data) * 3 / 4) / MiB_bytes,
@@ -537,13 +589,7 @@ class AudioMediaIO(MediaIO[tuple[npt.NDArray, float]]):
 
     def load_file(self, filepath: Path) -> tuple[npt.NDArray, float]:
         self._validate_encoded_size(filepath.stat().st_size)
-        return load_audio(
-            filepath,
-            sr=None,
-            max_duration_s=envs.APHRODITE_MAX_AUDIO_DECODE_DURATION_S,
-            max_decode_bytes=envs.APHRODITE_MAX_AUDIO_DECODE_BYTES,
-            backend=self.audio_backend,
-        )
+        return self._load_with_budget(filepath)
 
     def encode_base64(
         self,

@@ -121,35 +121,6 @@ async def test_score_api_queries_str_n_documents_str_n(hf_model, server: RemoteO
 
 
 @pytest.mark.asyncio
-async def test_score_api_queries_vs_documents(hf_model, server: RemoteOpenAIServer):
-    text_pairs = [
-        [TEXTS_1[0], TEXTS_2[0]],
-        [TEXTS_1[1], TEXTS_2[1]],
-    ]
-
-    score_response = requests.post(
-        server.url_for("score"),
-        json={
-            "model": MODEL_NAME,
-            "queries": TEXTS_1,
-            "documents": TEXTS_2,
-        },
-    )
-    score_response.raise_for_status()
-    score = ScoreResponse.model_validate(score_response.json())
-
-    assert score.id is not None
-    assert score.data is not None
-    assert len(score.data) == 2
-
-    aphrodite_outputs = [d.score for d in score.data]
-    hf_outputs = hf_model.predict(text_pairs).tolist()
-
-    for i in range(len(aphrodite_outputs)):
-        assert hf_outputs[i] == pytest.approx(aphrodite_outputs[i], rel=0.01)
-
-
-@pytest.mark.asyncio
 async def test_score_api_queries_vs_items(hf_model, server: RemoteOpenAIServer):
     text_pairs = [
         [TEXTS_1[0], TEXTS_2[0]],

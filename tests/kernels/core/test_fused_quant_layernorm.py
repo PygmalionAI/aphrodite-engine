@@ -289,7 +289,14 @@ def test_rms_norm(
     # Per-block bf16 scales: allow a small relative tolerance for a few groups
     # whose abs-max flips by one ULP between the fused and reference paths. The
     # per-token and fp32 paths stay strict.
-    relax_block_rocm = group_size is not None and dtype == torch.bfloat16 and current_platform.is_rocm()
+    # The same one-ULP group-scale flip also occurs on CUDA (H200), so extend
+    # the block relaxation there too — the fused groupwise reduction rounds
+    # differently than the reference for isolated groups.
+    relax_block = (
+        group_size is not None
+        and dtype == torch.bfloat16
+        and (current_platform.is_rocm() or current_platform.is_cuda())
+    )
     use_gfx950_fp8_allclose = (
         current_platform.is_rocm()
         and ON_GFX950
@@ -307,7 +314,7 @@ def test_rms_norm(
     def scales_close(rtol: float, atol: float) -> bool:
         if torch.allclose(ref_scales, ops_scales, rtol=rtol, atol=atol):
             return True
-        return relax_block_rocm and torch.allclose(ref_scales, ops_scales, rtol=1e-2, atol=atol)
+        return relax_block and torch.allclose(ref_scales, ops_scales, rtol=1e-2, atol=atol)
 
     if quant_dtype == torch.int8:
         assert scales_close(rtol=1e-5, atol=1e-6)
@@ -319,7 +326,7 @@ def test_rms_norm(
         b = ops_out.to(dtype=torch.float32)
         ok = torch.allclose(a, b, atol=1e-6)
         if not ok:
-            if relax_block_rocm:
+            if relax_block:
                 # ULP-flipped group scale can cross an E4M3 tie; tolerate a
                 # bounded count of isolated fp8 outliers.
                 ulp = fp8_ulp_distance(ref_out, ops_out)

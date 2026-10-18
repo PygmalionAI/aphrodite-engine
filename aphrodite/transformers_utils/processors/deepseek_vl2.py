@@ -181,9 +181,7 @@ class DeepseekVLV2Processor(ProcessorMixin):
         inference_mode: bool = True,
         **kwargs: Any,
     ):
-        """
-
-        Args:
+        """Args:
             prompt (str): the formatted prompt;
             images (list[ImageType]): the list of images;
             inference_mode (bool): if True, then remove the last eos token;
@@ -196,8 +194,8 @@ class DeepseekVLV2Processor(ProcessorMixin):
                 - pixel_values (torch.FloatTensor): [n_patches, 3, H, W]
                 - image_id (int): the id of the image token
                 - num_image_tokens (list[int]): the number of image tokens
-        """
 
+        """
         if prompt is None or images is None:
             raise ValueError("prompt and images must be used at the same time.")
 
@@ -265,9 +263,7 @@ class DeepseekVLV2Processor(ProcessorMixin):
         inference_mode: bool = True,
         **kwargs: Any,
     ):
-        """
-
-        Args:
+        """Args:
             text (str): the formatted prompt;
             images (list[ImageType]): the list of images;
             inference_mode (bool): if True, then remove the last eos token;
@@ -279,8 +275,8 @@ class DeepseekVLV2Processor(ProcessorMixin):
                 - images (torch.FloatTensor): [n_images, 3, H, W]
                 - image_id (int): the id of the image token
                 - num_image_tokens (list[int]): the number of image tokens
-        """
 
+        """
         prepare = self.process_one(
             prompt=text,
             images=images,

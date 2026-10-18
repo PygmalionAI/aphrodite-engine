@@ -30,7 +30,7 @@ from typing import Any, ClassVar
 
 import torch
 from torch import nn
-from transformers import AutoProcessor, PretrainedConfig
+from transformers import AutoProcessor, PreTrainedConfig
 
 from aphrodite.config import AphroditeConfig, CacheConfig
 from aphrodite.distributed import (
@@ -43,12 +43,13 @@ from aphrodite.model_executor.layers.activation import SiluAndMul
 from aphrodite.model_executor.layers.attention import Attention
 from aphrodite.model_executor.layers.fused_moe import (
     FusedMoEFactory,
+    GateLinear,
 )
+from aphrodite.model_executor.layers.fusion.mm_input_norm import build_mm_input_norm
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
@@ -178,10 +179,9 @@ class InternS1ProMoeSparseMoeBlock(nn.Module):
             custom_routing_function=self._custom_routing_function,
         )
 
-        self.gate = ReplicatedLinear(
+        self.gate = GateLinear(
             config.hidden_size,
             config.num_experts,
-            bias=False,
             prefix=f"{prefix}.gate",
         )
 
@@ -533,7 +533,7 @@ class InternS1ProForConditionalGeneration(Qwen3VLForConditionalGeneration, Inter
 
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = ""):
         super(Qwen3VLForConditionalGeneration, self).__init__()
-        config: PretrainedConfig = aphrodite_config.model_config.hf_config
+        config: PreTrainedConfig = aphrodite_config.model_config.hf_config
         multimodal_config = aphrodite_config.model_config.get_multimodal_config()
 
         self.config = config
@@ -545,6 +545,7 @@ class InternS1ProForConditionalGeneration(Qwen3VLForConditionalGeneration, Inter
             self.visual = Qwen3_VisionTransformer(
                 config.vision_config,
                 norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+                input_norm=build_mm_input_norm(self.model_config),
                 prefix=maybe_prefix(prefix, "visual"),
             )
 
@@ -578,7 +579,7 @@ class InternS1ProForConditionalGeneration(Qwen3VLForConditionalGeneration, Inter
         return mapper
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
-        """load weights"""
+        """Load weights"""
         orig_to_new_prefix: dict[str, str | None] = {
             "model.visual.": "visual.",
             "lm_head.": "language_model.lm_head.",

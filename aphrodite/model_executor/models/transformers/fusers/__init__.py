@@ -10,6 +10,9 @@ from aphrodite.model_executor.models.transformers.fusers.base import (
     StackedFuser,
 )
 from aphrodite.model_executor.models.transformers.fusers.glu import GLUFuser
+from aphrodite.model_executor.models.transformers.fusers.merged_column import (
+    MergedColumnParallelFuser,
+)
 from aphrodite.model_executor.models.transformers.fusers.mla import MLAFuser
 from aphrodite.model_executor.models.transformers.fusers.moe import MoEBlockFuser
 from aphrodite.model_executor.models.transformers.fusers.packed_qkv import PackedQKVFuser
@@ -22,6 +25,7 @@ __all__ = [
     "RewriteFuser",
     "StackedFuser",
     "GLUFuser",
+    "MergedColumnParallelFuser",
     "MLAFuser",
     "MoEBlockFuser",
     "PackedQKVFuser",

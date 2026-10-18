@@ -2,10 +2,10 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Tests that validation_exception_handler populates the `param` field
 in its error response using the Pydantic error's `loc`, even when no
-custom APHRODITEValidationError context is present.
+custom AphroditeValidationError context is present.
 
 Previously, `param` was only populated for errors carrying a custom
-APHRODITEValidationError in their Pydantic `ctx`. Plain validation failures
+AphroditeValidationError in their Pydantic `ctx`. Plain validation failures
 (missing fields, wrong types) left `param` as None, even though the
 field name was readily available from `error['loc']`.
 """
@@ -33,7 +33,7 @@ def _fake_request(log_error_stack: bool = False) -> SimpleNamespace:
 
 class TestValidationErrorParamFallback:
     """Ensure `param` falls back to the Pydantic error's `loc` when no
-    custom APHRODITEValidationError context is present."""
+    custom AphroditeValidationError context is present."""
 
     @pytest.mark.parametrize(
         ("error_type", "msg"),

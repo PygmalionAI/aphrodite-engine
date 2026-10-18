@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+use aphrodite_engine_core_client::runtime::BackgroundShutdownRuntime;
 use tokio::runtime::Builder;
 use tracing::{info, warn};
-use aphrodite_engine_core_client::runtime::BackgroundShutdownRuntime;
 
 const REQUEST_WORKER_THREADS_ENV: &str = "APHRODITE_RS_REQUEST_WORKER_THREADS";
 const DEFAULT_MAX_REQUEST_WORKER_THREADS: usize = 32;

@@ -12,7 +12,7 @@ from aphrodite import _custom_ops as ops
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig, CacheConfig, get_current_aphrodite_config
 from aphrodite.model_executor.layers.layernorm import RMSNorm
-from aphrodite.model_executor.layers.linear import ColumnParallelLinear, ReplicatedLinear
+from aphrodite.model_executor.layers.linear import ColumnParallelLinear, ReplicatedLinear, UnquantizedLinearMethod
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
 from aphrodite.model_executor.layers.vocab_parallel_embedding import (
@@ -20,11 +20,14 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding,
 )
 from aphrodite.model_executor.model_loader.weight_utils import default_weight_loader
-from aphrodite.transformers_utils.configs.gemma4 import gemma4_layer_config
 
 from .gemma4_mtp import Gemma4MTPAttention, Gemma4MTPDecoderLayer
 from .qwen3_dflash import DFlashQwen3Model, _dflash_layer_causal
-from .qwen3_dspark import DSparkMarkovHead, Qwen3DSparkForCausalLM
+from .qwen3_dspark import (
+    DSparkConfidenceHead,
+    DSparkMarkovHead,
+    Qwen3DSparkForCausalLM,
+)
 from .utils import extract_layer_index, get_draft_quant_config, maybe_prefix
 
 
@@ -42,7 +45,7 @@ class Gemma4DSparkAttention(Gemma4MTPAttention):
         layer_type = config.layer_types[layer_idx]
         self.use_k_eq_v = layer_type == "full_attention" and getattr(config, "attention_k_eq_v", False)
 
-        layer_config = gemma4_layer_config(config, layer_idx)
+        layer_config = config.per_layer_config[layer_idx]
         head_dim = layer_config.head_dim
         num_kv_heads = layer_config.num_key_value_heads
         super().__init__(
@@ -185,6 +188,18 @@ class Gemma4DSparkModel(DFlashQwen3Model):
             config.markov_rank,
             prefix=maybe_prefix(prefix, "markov_head"),
         )
+        self.confidence_head: DSparkConfidenceHead | None = None
+        if getattr(config, "enable_confidence_head", False):
+            with_markov = getattr(config, "confidence_head_with_markov", False)
+            input_dim = config.hidden_size
+            if with_markov:
+                input_dim += config.markov_rank
+            self.confidence_head = DSparkConfidenceHead(
+                input_dim,
+                prefix=maybe_prefix(prefix, "confidence_head"),
+                bias=True,
+                with_markov=with_markov,
+            )
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids) * self.normalizer
@@ -203,6 +218,7 @@ class Gemma4DSparkModel(DFlashQwen3Model):
         self._kv_size = attn0.kv_size
         self._head_dim = attn0.head_dim
         self._num_kv_heads = attn0.num_kv_heads
+        self._dcp_kv_replicas = getattr(attn0, "dcp_kv_replicas", 1)
         self._rms_norm_eps = attn0.q_norm.variance_epsilon
         self._attn_layers = [layer.self_attn.attn for layer in self.layers]
 
@@ -212,10 +228,15 @@ class Gemma4DSparkModel(DFlashQwen3Model):
         has_bias: bool,
     ) -> None:
         self._hidden_norm_weight = self.hidden_norm.weight.data
-        self._fused_k_weight = torch.cat([a.k_proj.weight for a in layers_attn], dim=0)
-        self._fused_k_bias: torch.Tensor | None = (
-            torch.cat([a.k_proj.bias for a in layers_attn], dim=0) if has_bias else None
-        )
+        self._context_k_projs = [a.k_proj for a in layers_attn]
+        if all(isinstance(proj.quant_method, UnquantizedLinearMethod) for proj in self._context_k_projs):
+            self._fused_k_weight: torch.Tensor | None = torch.cat([a.k_proj.weight for a in layers_attn], dim=0)
+            self._fused_k_bias: torch.Tensor | None = (
+                torch.cat([a.k_proj.bias for a in layers_attn], dim=0) if has_bias else None
+            )
+        else:
+            self._fused_k_weight = None
+            self._fused_k_bias = None
         self._k_norm_weights = torch.stack([a.k_norm.weight.data for a in layers_attn], dim=0).contiguous()
         # v_norm has no learnable scale; ones matching the K-norm call shape.
         self._v_norm_weights = torch.ones(
@@ -237,8 +258,14 @@ class Gemma4DSparkModel(DFlashQwen3Model):
         # applies k_norm + RoPE); V = v_norm(same projection), no RoPE (k_eq_v).
         normed = torch.empty_like(context_states)
         ops.rms_norm(normed, context_states, self._hidden_norm_weight, self._rms_norm_eps)
-        all_k_flat = F.linear(normed, self._fused_k_weight, self._fused_k_bias)
-        all_k = all_k_flat.view(num_ctx, num_layers, num_kv_heads, head_dim).permute(1, 0, 2, 3).contiguous()
+        if self._fused_k_weight is not None:
+            all_k_flat = F.linear(normed, self._fused_k_weight, self._fused_k_bias)
+            all_k = all_k_flat.view(num_ctx, num_layers, num_kv_heads, head_dim).permute(1, 0, 2, 3).contiguous()
+        else:
+            all_k = torch.stack(
+                [proj(normed)[0].view(num_ctx, num_kv_heads, head_dim) for proj in self._context_k_projs],
+                dim=0,
+            )
         all_v = torch.empty_like(all_k)
         ops.rms_norm(all_v, all_k, self._v_norm_weights, self._rms_norm_eps)
         return all_k, all_v
@@ -286,9 +313,8 @@ class Gemma4DSparkForCausalLM(Qwen3DSparkForCausalLM):
         params = dict(self.named_parameters())
         params.update(dict(self.named_buffers()))
         loaded: set[str] = set()
+        includes_confidence_head = False
         for name, w in weights:
-            if "confidence_head" in name:
-                continue
             if "lm_head" not in name:
                 name = "model." + name
             for pn, wn, shard in stacked:
@@ -301,5 +327,9 @@ class Gemma4DSparkForCausalLM(Qwen3DSparkForCausalLM):
                     p = params[name]
                     getattr(p, "weight_loader", default_weight_loader)(p, w)
                     loaded.add(name)
+                    if "confidence_head" in name:
+                        includes_confidence_head = True
+        if not includes_confidence_head:
+            self.model.confidence_head = None
         self.model._build_fused_kv_buffers()
         return loaded

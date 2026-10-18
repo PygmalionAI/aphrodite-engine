@@ -25,28 +25,25 @@ import torch
 from aphrodite.config import AphroditeConfig, ModelConfig, SpeechToTextConfig
 from aphrodite.inputs import PromptType, TokensPrompt
 from aphrodite.logger import init_logger
-from aphrodite.model_executor.models.interfaces import (
-    SupportsRealtime,
+from aphrodite.multimodal import MULTIMODAL_REGISTRY
+from aphrodite.multimodal.parse import MultiModalDataItems
+from aphrodite.multimodal.processing import ProcessorInputs, TimingContext
+from aphrodite.multimodal.processing.processor import (
+    MultiModalProcessingResult,
+    PlaceholderFeaturesInfo,
+    cached_encode,
 )
-from aphrodite.model_executor.models.qwen3_asr import (
+from aphrodite.tokenizers import cached_tokenizer_from_config
+from aphrodite.transformers_utils.processor import cached_processor_from_config
+
+from .interfaces import SupportsRealtime
+from .qwen3_asr import (
     Qwen3ASRDummyInputsBuilder,
     Qwen3ASRForConditionalGeneration,
     Qwen3ASRMultiModalProcessor,
     Qwen3ASRProcessingInfo,
     _get_feat_extract_output_lengths,
 )
-from aphrodite.multimodal import MULTIMODAL_REGISTRY
-from aphrodite.multimodal.cache import _I, BaseMultiModalProcessorCache
-from aphrodite.multimodal.inputs import MultiModalKwargsOptionalItems
-from aphrodite.multimodal.parse import MultiModalDataItems
-from aphrodite.multimodal.processing.processor import (
-    BaseDummyInputsBuilder,
-    MultiModalPromptUpdates,
-    PlaceholderFeaturesInfo,
-    cached_encode,
-)
-from aphrodite.tokenizers import cached_tokenizer_from_config
-from aphrodite.transformers_utils.processor import cached_processor_from_config
 
 logger = init_logger(__name__)
 
@@ -100,26 +97,26 @@ class Qwen3ASRRealtimeBuffer:
 
 
 class Qwen3ASRRealtimeMultiModalProcessor(Qwen3ASRMultiModalProcessor):
-    def __init__(
+    def _cached_apply_hf_processor(
         self,
-        info: _I,
-        dummy_inputs: BaseDummyInputsBuilder[_I],
-        *,
-        cache: BaseMultiModalProcessorCache | None = None,
-    ) -> None:
-        super().__init__(info, dummy_inputs, cache=None)
+        inputs: ProcessorInputs,
+        timing_ctx: TimingContext,
+    ) -> MultiModalProcessingResult:
+        # realtime can't make use of a cache yet
+        return self._apply_hf_processor(inputs, timing_ctx)
 
     def _maybe_apply_prompt_updates(
         self,
         mm_items: MultiModalDataItems,
-        prompt_ids: list[int],
-        mm_kwargs: MultiModalKwargsOptionalItems,
-        mm_prompt_updates: MultiModalPromptUpdates,
+        mm_res: MultiModalProcessingResult,
     ) -> tuple[list[int], Mapping[str, list[PlaceholderFeaturesInfo]]]:
+        mm_kwargs = mm_res.kwargs
+
         audios = mm_kwargs.get("audio", [])
         assert len(audios) == 1, f"Expected only one audio input for realtime, got {len(audios)}"
 
         audio_data = audios[0]
+        assert audio_data is not None
         audio_feature_lengths = audio_data.get("audio_feature_lengths")
         if audio_feature_lengths is not None:
             if isinstance(audio_feature_lengths.data, torch.Tensor):
@@ -137,7 +134,7 @@ class Qwen3ASRRealtimeMultiModalProcessor(Qwen3ASRMultiModalProcessor):
         # Find the audio_pad token position and expand it to audio_len tokens
         expanded_ids = list[int]()
         pad_start_idx = -1
-        for i, tid in enumerate(prompt_ids):
+        for i, tid in enumerate(mm_res.prompt_ids):
             if tid == audio_pad_id and pad_start_idx == -1:
                 pad_start_idx = i
                 expanded_ids.extend([audio_pad_id] * audio_len)

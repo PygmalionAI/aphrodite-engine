@@ -135,7 +135,6 @@ def test_dry_history_survives_compaction_and_slot_reuse():
         device=torch.device("cpu"),
         vocab_size=16,
         block_sizes=[16],
-        kernel_block_sizes=[16],
         max_num_blocks_per_req=[4],
     )
 

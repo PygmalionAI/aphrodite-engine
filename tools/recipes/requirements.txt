@@ -1,0 +1,4 @@
+# Dependencies used by `aphrodite bench sweep plot`.
+matplotlib
+pandas
+seaborn

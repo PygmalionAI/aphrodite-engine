@@ -64,24 +64,20 @@ def _turboquant_page_size_bytes(block_size: int, num_kv_heads: int, head_dim: in
 class TurboQuantAttentionSpec(FullAttentionSpec):
     """FullAttentionSpec for TurboQuant-compressed KV cache.
 
-    Reports the true packed byte count per page via an override of
-    ``real_page_size_bytes`` so Aphrodite's scheduler can budget more blocks
-    than the FP16 formula would allow — without lying about ``head_size``
-    (the ``head_size_v`` reverse-engineering trick the previous version
-    used produced negative values for aggressive 2-bit configs).
-
-    Mirrors the upstream pattern of :class:`MLAAttentionSpec` which
-    overrides ``real_page_size_bytes`` for its ``fp8_ds_mla`` cache layout.
+    Reports the true packed bytes per head and stored state through
+    ``state_content_size_bytes``. The inherited page-size calculation then
+    budgets compressed pages correctly, including padded page allocations,
+    without changing the model's real ``head_size``.
     """
 
     k_quant: str
     v_quant: str
 
     @property
-    def real_page_size_bytes(self) -> int:
+    def state_content_size_bytes(self) -> int:
         return _turboquant_page_size_bytes(
-            block_size=self.block_size,
-            num_kv_heads=self.num_kv_heads,
+            block_size=1,
+            num_kv_heads=1,
             head_dim=self.head_size,
             k_quant=self.k_quant,
             v_quant=self.v_quant,
@@ -100,15 +96,23 @@ class TurboQuantAttentionSpec(FullAttentionSpec):
         )
         return cls(
             block_size=specs[0].block_size,
+            block_stride_alignment=specs[0].block_stride_alignment,
             num_kv_heads=specs[0].num_kv_heads,
             head_size=specs[0].head_size,
             head_size_v=specs[0].head_size_v,
             dtype=specs[0].dtype,
+            kv_quant_mode=specs[0].kv_quant_mode,
+            dcp_sharded=specs[0].dcp_sharded,
+            max_tp_shards=specs[0].max_tp_shards,
             page_size_padded=specs[0].page_size_padded,
+            num_head_slots=specs[0].num_head_slots,
+            state_content_bytes=specs[0].state_content_bytes,
+            tokens_per_state=specs[0].tokens_per_state,
             sliding_window=cls.merge_window_sizes({s.sliding_window for s in specs if s.sliding_window is not None}),
             attention_chunk_size=cls.merge_window_sizes(
                 {s.attention_chunk_size for s in specs if s.attention_chunk_size is not None}
             ),
+            non_causal=any(s.non_causal for s in specs),
             k_quant=k_set.pop(),
             v_quant=v_set.pop(),
         )
@@ -123,9 +127,9 @@ def _build_turboquant_attention_spec(
 ) -> TurboQuantAttentionSpec:
     """Build a TurboQuantAttentionSpec for a single attention layer.
 
-    Reports the real compressed page size via ``real_page_size_bytes``
-    override, so the scheduler allocates the right number of blocks and
-    ``head_size`` stays equal to the model's real head_dim.
+    Reports compressed geometry through ``state_content_size_bytes`` so the
+    scheduler allocates the right number of blocks and ``head_size`` remains
+    equal to the model's real head_dim.
     """
     return TurboQuantAttentionSpec(
         block_size=block_size,

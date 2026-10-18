@@ -72,7 +72,7 @@ def stream_delta_message_generator(
             previous_token_ids,
             current_token_ids,
             delta_token_ids,
-            request=None,  # type: ignore[arg-type]
+            request=None,
         )
         if delta_message:
             yield delta_message
@@ -85,7 +85,7 @@ def stream_delta_message_generator(
 
 def test_extract_tool_calls_no_tools(jamba_tool_parser):
     model_output = "This is a test"
-    extracted_tool_calls = jamba_tool_parser.extract_tool_calls(model_output, request=None)  # type: ignore[arg-type]
+    extracted_tool_calls = jamba_tool_parser.extract_tool_calls(model_output, request=None)
     assert not extracted_tool_calls.tools_called
     assert extracted_tool_calls.tool_calls == []
     assert extracted_tool_calls.content == model_output
@@ -144,7 +144,7 @@ def test_extract_tool_calls_no_tools(jamba_tool_parser):
     ],
 )
 def test_extract_tool_calls(jamba_tool_parser, model_output, expected_tool_calls, expected_content):
-    extracted_tool_calls = jamba_tool_parser.extract_tool_calls(model_output, request=None)  # type: ignore[arg-type]
+    extracted_tool_calls = jamba_tool_parser.extract_tool_calls(model_output, request=None)
     assert extracted_tool_calls.tools_called
 
     assert_tool_calls(extracted_tool_calls.tool_calls, expected_tool_calls)

@@ -8,9 +8,10 @@
 //! parsing are handled earlier by their own adapters. This stage consumes those
 //! parsed deltas and assembles higher-level assistant content blocks.
 
+use aphrodite_llm::RequestTimestamps;
+use aphrodite_text::DecodedLogprobs;
 use asynk_strim_attr::{TryYielder, try_stream};
 use futures::{StreamExt as _, pin_mut};
-use aphrodite_text::DecodedLogprobs;
 
 use super::{AssistantEvent, AssistantEventStream};
 use crate::error::Error;
@@ -149,9 +150,10 @@ impl StructuredEventState {
     fn finish(
         &mut self,
         usage: ChatTokenUsage,
+        timestamps: RequestTimestamps,
         finish_reason: FinishReason,
-        kv_transfer_params: Option<serde_json::Value>,
-        ec_transfer_params: Option<serde_json::Value>,
+        kv_transfer_params: Option<Box<serde_json::Value>>,
+        ec_transfer_params: Option<Box<serde_json::Value>>,
     ) -> Result<Vec<ChatEvent>> {
         let mut events = Vec::new();
         self.close_open_text_block(&mut events);
@@ -159,6 +161,7 @@ impl StructuredEventState {
         events.push(ChatEvent::Done {
             message: self.message.clone(),
             usage,
+            timestamps,
             finish_reason,
             kv_transfer_params,
             ec_transfer_params,
@@ -312,11 +315,18 @@ pub(crate) async fn structured_chat_event_stream(
             }
             AssistantEvent::Done {
                 usage,
+                timestamps,
                 finish_reason,
                 kv_transfer_params,
                 ec_transfer_params,
             } => {
-                for next in state.finish(usage, finish_reason, kv_transfer_params, ec_transfer_params)? {
+                for next in state.finish(
+                    usage,
+                    timestamps,
+                    finish_reason,
+                    kv_transfer_params,
+                    ec_transfer_params,
+                )? {
                     y.yield_ok(next).await;
                 }
             }
@@ -351,6 +361,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
@@ -406,6 +417,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
@@ -459,6 +471,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
@@ -512,6 +525,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
@@ -580,6 +594,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,
@@ -631,6 +646,7 @@ mod tests {
                     },
                     reasoning_tokens: 3,
                 },
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,

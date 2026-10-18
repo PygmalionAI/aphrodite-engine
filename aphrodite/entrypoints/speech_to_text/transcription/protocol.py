@@ -15,7 +15,7 @@ from pydantic import (
 from aphrodite.config.speech_to_text import SpeechToTextParams
 from aphrodite.entrypoints.generate.base.protocol import DeltaMessage
 from aphrodite.entrypoints.serve.engine.protocol import OpenAIBaseModel, UsageInfo
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.sampling_params import (
     BeamSearchParams,
@@ -148,6 +148,9 @@ class TranscriptionRequest(OpenAIBaseModel):
     to automatically increase the temperature until certain thresholds are hit.
     """
 
+    watermarking: bool | None = None
+    """Whether to apply the engine's configured watermark to this request."""
+
     top_p: float | None = None
     """Enables nucleus (top-p) sampling, where tokens are selected from the
     smallest possible set whose cumulative probability exceeds `p`.
@@ -223,6 +226,7 @@ class TranscriptionRequest(OpenAIBaseModel):
             beam_width=n,
             max_tokens=max_tokens,
             temperature=temperature,
+            watermarking=self.watermarking,
             length_penalty=self.length_penalty,
             include_stop_str_in_output=self.include_stop_str_in_output,
         )
@@ -253,6 +257,7 @@ class TranscriptionRequest(OpenAIBaseModel):
 
         return SamplingParams.from_optional(
             temperature=temperature,
+            watermarking=self.watermarking,
             max_tokens=max_tokens,
             seed=self.seed,
             top_p=top_p,
@@ -285,7 +290,7 @@ class TranscriptionRequest(OpenAIBaseModel):
                 (so for so in stream_opts if data.get(so, False)),
                 "stream_include_usage",
             )
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Stream options can only be defined when `stream=True`.",
                 parameter=invalid_param,
             )
@@ -296,7 +301,7 @@ class TranscriptionRequest(OpenAIBaseModel):
             try:
                 data["aphrodite_xargs"] = json.loads(xargs)
             except json.JSONDecodeError as e:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"Failed to parse aphrodite_xargs. Must be valid JSON: {e}",
                     parameter="aphrodite_xargs",
                 ) from e

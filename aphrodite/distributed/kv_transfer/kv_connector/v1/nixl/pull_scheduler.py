@@ -32,8 +32,7 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
         super().__init__(aphrodite_config, engine_id, kv_cache_config)
 
     def get_num_new_matched_tokens(self, request: "Request", num_computed_tokens: int) -> tuple[int, bool]:
-        """
-        For remote prefill, pull all prompt blocks from remote
+        """For remote prefill, pull all prompt blocks from remote
         asynchronously relative to engine execution.
 
         Args:
@@ -45,8 +44,8 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
               external KV cache beyond what is already computed.
             * true if the external KV cache tokens will be loaded
               asynchronously (between scheduler steps).
-        """
 
+        """
         params = request.kv_transfer_params
         logger.debug(
             "NIXLConnector get_num_new_matched_tokens: num_computed_tokens=%s, kv_transfer_params=%s",
@@ -154,6 +153,9 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
                         request,
                         local_block_ids,
                         local_num_computed_blocks,
+                        # Parked in WAITING_FOR_REMOTE_KVS only when there is
+                        # something to pull; a full local hit stays RUNNING.
+                        num_external_tokens > 0,
                     )
 
                 else:
@@ -172,8 +174,7 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
         request: "Request",
         block_ids: "BlockIds",
     ) -> tuple[bool, dict[str, Any] | None]:
-        """
-        Once a request is finished, determine whether request blocks
+        """Once a request is finished, determine whether request blocks
         should be freed now or will be sent asynchronously and freed later.
         """
         from aphrodite.v1.request import RequestStatus
@@ -204,7 +205,7 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
             # To avoid stranding the prefill blocks in the prefill instance,
             # we must add empty block_ids to _reqs_need_recv so that our
             # worker side will notify and free blocks in the prefill instance.
-            self._reqs_need_recv[request.request_id] = (request, [], ())
+            self._reqs_need_recv[request.request_id] = (request, [], (), False)
             params["do_remote_prefill"] = False
             return False, None
 
@@ -259,7 +260,7 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
             remote_request_id=request.request_id,
             remote_host=self.side_channel_host,
             remote_port=self.side_channel_port,
-            tp_size=self.aphrodite_config.parallel_config.tensor_parallel_size,
+            tp_size=self.transfer_tp_size,
             dcp_size=self.aphrodite_config.parallel_config.decode_context_parallel_size,
             pp_size=self.aphrodite_config.parallel_config.pipeline_parallel_size,
             remote_num_tokens=remote_num_tokens,

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""grammar_bitmask under spec-decode draft padding (#44006)."""
+"""Backend and engine-reasoner checks that are not manager-flow tests."""
+
+from typing import Literal
 
 import pytest
 from transformers import AutoTokenizer
@@ -8,6 +10,8 @@ from transformers import AutoTokenizer
 from aphrodite.config import AphroditeConfig, StructuredOutputsConfig
 from aphrodite.config.model import ModelConfig
 from aphrodite.config.speculative import SpeculativeConfig
+from aphrodite.parser.engine.adapters import ParserEngineReasoningAdapter
+from aphrodite.parser.engine.parser_engine import ReasoningEnd
 from aphrodite.sampling_params import SamplingParams, StructuredOutputsParams
 from aphrodite.v1.request import Request
 from aphrodite.v1.structured_output import StructuredOutputManager
@@ -16,7 +20,7 @@ TOKENIZER = "gpt2"
 NUM_SPEC_TOKENS = 4
 
 
-def _make_manager_and_request(backend: str, prompt_str: str = '{"a": "b"}'):
+def _make_manager_and_request(backend: Literal["xgrammar", "guidance"], prompt_str: str = '{"a": "b"}'):
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER)
     prompt = tokenizer.encode(prompt_str)
 
@@ -30,6 +34,7 @@ def _make_manager_and_request(backend: str, prompt_str: str = '{"a": "b"}'):
     sampling_params = SamplingParams(
         structured_outputs=StructuredOutputsParams(json='{"type": "object"}'),
     )
+    assert sampling_params.structured_outputs is not None
     sampling_params.structured_outputs._backend = backend
     sampling_params.update_from_generation_config({}, tokenizer.eos_token_id)
 
@@ -40,213 +45,11 @@ def _make_manager_and_request(backend: str, prompt_str: str = '{"a": "b"}'):
         pooling_params=None,
     )
     manager.grammar_init(request)
+    assert request.structured_output_request is not None
     while not request.structured_output_request._check_grammar_completion():
         continue
 
     return tokenizer, manager, request, prompt
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bitmask_with_padded_invalid_drafts(backend):
-    """Bitmask handles -1 padded drafts and returns N+1 rows."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend, prompt_str='{"a"')
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-
-    valid_drafts = [tokenizer.encode(":")[0], tokenizer.encode(' "')[0]]
-    padded = valid_drafts + [-1, -1]
-
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: padded},
-    )
-
-    assert bitmask is not None
-    assert bitmask.shape[0] == len(padded) + 1
-    assert not grammar.is_terminated()
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bitmask_when_grammar_terminates_mid_window(backend):
-    """Drafts following an EOS that terminates the grammar are a no-op."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend)
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-    eos = tokenizer.eos_token_id
-    drafts = [eos] + [tokenizer.encode(" ")[0]] * (NUM_SPEC_TOKENS - 1)
-
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-
-    assert bitmask is not None
-    assert bitmask.shape[0] == NUM_SPEC_TOKENS + 1
-    assert not grammar.is_terminated()
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bitmask_idempotent_across_calls(backend):
-    """Repeated calls with the same input return the same bitmask."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend, prompt_str='{"a"')
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-
-    drafts = [tokenizer.encode(":")[0], -1, -1, -1]
-
-    first = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-    second = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-
-    assert first is not None and second is not None
-    assert (first == second).all()
-    assert not grammar.is_terminated()
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bonus_position_constrained_after_invalid_drafts(backend):
-    """Regression for #44006: bonus row stays constrained after -1 padding."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend, prompt_str='{"a"')
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-
-    valid = tokenizer.encode(":")[0]
-    drafts = [valid, -1, -1, -1]
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-    assert bitmask is not None
-    assert bitmask.shape[0] == len(drafts) + 1
-
-    assert not (bitmask[-1] == -1).all()
-    assert not grammar.is_terminated()
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bitmask_constrained_when_reasoning_ends_midwindow(backend):
-    """Drafts after a mid-window reasoning-end marker stay constrained."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend)
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-
-    marker = tokenizer.encode("\n")[0]
-
-    class StubReasoner:
-        def __init__(self, *_, **__):
-            self.end_token_id = marker
-
-        def is_reasoning_end(self, input_ids):
-            return marker in list(input_ids)
-
-        def is_reasoning_end_streaming(self, input_ids, delta_ids):
-            return marker in list(delta_ids)
-
-    manager.reasoner_cls = StubReasoner
-    request.structured_output_request.reasoner = StubReasoner()
-    request.structured_output_request.reasoning_ended = False
-
-    pre = tokenizer.encode(" ")[0]
-    post = tokenizer.encode(",")[0]
-    drafts = [pre, marker, post]
-
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-
-    assert bitmask is not None
-    assert bitmask.shape[0] == len(drafts) + 1
-    assert (bitmask[0] == -1).all()
-    assert (bitmask[1] == -1).all()
-    assert not (bitmask[2] == -1).all()
-    assert not (bitmask[-1] == -1).all()
-    assert not grammar.is_terminated()
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_bitmask_post_reasoning_end_drafts_skip_grammar_advance(backend, caplog):
-    """Post-marker drafts predate the bitmask and may be grammar-invalid;
-    grammar_bitmask must skip the grammar advance instead of asserting.
-    """
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend, prompt_str="{")
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-    assert not grammar.is_terminated()
-
-    marker = tokenizer.encode("\n")[0]
-
-    class StubReasoner:
-        def __init__(self, *_, **__):
-            self.end_token_id = marker
-
-        def is_reasoning_end(self, input_ids):
-            return marker in list(input_ids)
-
-        def is_reasoning_end_streaming(self, input_ids, delta_ids):
-            return marker in list(delta_ids)
-
-    manager.reasoner_cls = StubReasoner
-    request.structured_output_request.reasoner = StubReasoner()
-    request.structured_output_request.reasoning_ended = False
-
-    pre = tokenizer.encode(" ")[0]
-    invalid_post = tokenizer.encode("z")[0]
-    drafts = [pre, marker, invalid_post]
-
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: drafts},
-    )
-
-    assert bitmask is not None
-    assert bitmask.shape[0] == len(drafts) + 1
-    assert not (bitmask[2] == -1).all()
-    assert not grammar.is_terminated()
-    assert "Failed to advance FSM" not in caplog.text
-
-
-@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
-def test_validate_tokens_then_bitmask_round_trip(backend):
-    """validate_tokens -> pad with -1 -> grammar_bitmask must not assert."""
-    tokenizer, manager, request, prompt = _make_manager_and_request(backend)
-    grammar = request.structured_output_request.grammar
-
-    assert grammar.accept_tokens(request.request_id, prompt)
-
-    raw_drafts = [tokenizer.encode(",")[0], 99999, 12345, 67890]
-    accepted = grammar.validate_tokens(raw_drafts)
-    assert len(accepted) <= len(raw_drafts)
-
-    padded = accepted + [-1] * (len(raw_drafts) - len(accepted))
-    assert len(padded) == len(raw_drafts)
-
-    bitmask = manager.grammar_bitmask(
-        requests={request.request_id: request},
-        structured_output_request_ids=[request.request_id],
-        scheduled_spec_decode_tokens={request.request_id: padded},
-    )
-    assert bitmask is not None
-    assert bitmask.shape[0] == len(padded) + 1
-    assert not grammar.is_terminated()
 
 
 def test_xgrammar_accept_tokens_stops_at_termination(capfd):
@@ -287,7 +90,6 @@ def test_xgrammar_validate_tokens_stops_at_termination(capfd):
 
     assert grammar.validate_tokens([eos, trailing]) == [eos]
     assert "trying to accept new token" not in capfd.readouterr().err
-    # Check matcher state directly to verify validation rolled it back.
     assert not grammar.matcher.is_terminated()
 
     assert grammar.accept_tokens(request.request_id, [eos])
@@ -297,72 +99,63 @@ def test_xgrammar_validate_tokens_stops_at_termination(capfd):
     assert "trying to accept new token" not in capfd.readouterr().err
 
 
-class _MarkerReasoner:
-    """Stub reasoner whose reasoning-end marker is a single fixed token."""
+class _EngineReasonerStub(ParserEngineReasoningAdapter):
+    """Adapter-typed reasoner with a fixed end-token set and no real engine."""
 
-    def __init__(self, marker: int):
-        self.marker = marker
+    def __init__(self, end_token_ids):
+        self._end_token_ids = frozenset(end_token_ids)
+        self.windows: list[list[int]] = []
+
+    @property
+    def reasoning_end_token_ids(self):
+        return self._end_token_ids
+
+    @property
+    def implicit_reasoning_end_token_ids(self):
+        return frozenset()
+
+    def find_reasoning_end(self, token_ids):
+        self.windows.append(list(token_ids))
+        for offset, token in enumerate(token_ids):
+            if token in self._end_token_ids:
+                return ReasoningEnd(offset, False)
+        return ReasoningEnd(len(token_ids), False)
 
     def is_reasoning_end(self, input_ids):
-        return self.marker in list(input_ids)
+        return any(token in self._end_token_ids for token in input_ids)
 
     def is_reasoning_end_streaming(self, input_ids, delta_ids):
-        return self.marker in list(delta_ids)
+        raise AssertionError("engine path must not rescan draft prefixes")
 
 
-def _setup_boundary_request(backend: str):
-    """Request with a structural-tag key and reasoning not yet ended."""
-    from aphrodite.v1.structured_output.backend_types import StructuredOutputOptions
-
+@pytest.mark.parametrize("backend", ["xgrammar", "guidance"])
+def test_bitmask_engine_reasoner_ends_midwindow_with_padding(backend):
+    """Engine reasoners see the draft window once, without -1 padding."""
     tokenizer, manager, request, prompt = _make_manager_and_request(backend)
+    grammar = request.structured_output_request.grammar
+
+    assert grammar.accept_tokens(request.request_id, prompt)
+
     marker = tokenizer.encode("\n")[0]
-    structured_req = request.structured_output_request
-    # The grammar itself is JSON (cheap to build); only the key kind matters
-    # for the should_advance structural-tag branch, so pre-seed the cached
-    # property.
-    structured_req.__dict__["structured_output_key"] = (
-        StructuredOutputOptions.STRUCTURAL_TAG,
-        "",
+    reasoner = _EngineReasonerStub({marker})
+    manager.reasoner_cls = _EngineReasonerStub
+    request.structured_output_request.reasoner = reasoner
+    request.structured_output_request.reasoning_ended = False
+
+    pre = tokenizer.encode(" ")[0]
+    post = tokenizer.encode(",")[0]
+    drafts = [pre, marker, post, -1]
+
+    bitmask = manager.grammar_bitmask(
+        requests={request.request_id: request},
+        structured_output_request_ids=[request.request_id],
+        scheduled_spec_decode_tokens={request.request_id: drafts},
     )
-    manager.reasoner_cls = _MarkerReasoner
-    structured_req.reasoner = _MarkerReasoner(marker)
-    structured_req.reasoning_ended = False
-    return tokenizer, manager, request, prompt, marker
 
-
-def test_should_advance_records_reasoning_end_index():
-    """The boundary step must record where reasoning ends."""
-    tokenizer, manager, request, prompt, marker = _setup_boundary_request("xgrammar")
-    structured_req = request.structured_output_request
-
-    pre = tokenizer.encode(" ")[0]
-    post = tokenizer.encode("{")[0]
-    request.append_output_token_ids([pre, marker, post])
-
-    assert manager.should_advance(request)
-    assert structured_req.reasoning_ended
-    assert structured_req.reasoning_end_token_index == len(prompt) + 1
-
-
-def test_trim_reasoning_for_advance():
-    """Trim drops the marker and everything before it."""
-    tokenizer, manager, request, prompt, marker = _setup_boundary_request("xgrammar")
-    structured_req = request.structured_output_request
-
-    pre = tokenizer.encode(" ")[0]
-    post = tokenizer.encode("{")[0]
-
-    assert manager.trim_reasoning_for_advance(request, [pre]) == [pre]
-
-    step_tokens = [pre, marker, post]
-    request.append_output_token_ids(step_tokens)
-    assert manager.should_advance(request)
-    assert manager.trim_reasoning_for_advance(request, step_tokens) == [post]
-
-    structured_req.reasoning_end_token_index = len(request.all_token_ids) - 1
-    assert manager.trim_reasoning_for_advance(request, step_tokens) == []
-
-    structured_req.reasoning_end_token_index = len(prompt) + 1
-    next_step = [post, post]
-    request.append_output_token_ids(next_step)
-    assert manager.trim_reasoning_for_advance(request, next_step) == next_step
+    assert bitmask is not None
+    assert bitmask.shape[0] == len(drafts) + 1
+    assert (bitmask[0] == -1).all()
+    assert (bitmask[1] == -1).all()
+    assert not (bitmask[2] == -1).all()
+    assert reasoner.windows == [[pre, marker, post]]
+    assert not grammar.is_terminated()

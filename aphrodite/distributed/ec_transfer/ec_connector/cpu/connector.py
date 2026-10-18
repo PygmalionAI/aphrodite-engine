@@ -89,6 +89,10 @@ class ECCPUConnector(ECConnectorBase):
         assert self.connector_scheduler is not None
         return self.connector_scheduler.ensure_cache_available(request, num_computed_tokens)
 
+    def take_unavailable_requests(self) -> set[str]:
+        assert self.connector_scheduler is not None
+        return self.connector_scheduler.take_unavailable_requests()
+
     def update_state_after_alloc(self, request: "Request", index: int) -> None:
         assert self.connector_scheduler is not None
         self.connector_scheduler.update_state_after_alloc(request, index)

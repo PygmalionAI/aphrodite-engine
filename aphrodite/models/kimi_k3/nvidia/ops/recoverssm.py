@@ -264,7 +264,10 @@ def _prepare_commit_plan_kernel(
     if ALIGN_MODE:
         num_computed = tl.load(num_computed_ptr + request_idx * stride_num_computed).to(tl.int32)
         final_num_computed = num_computed + commit_len
-        final_state_col = tl.minimum(final_num_computed // mamba_block_size, block_table_width - 1)
+        final_state_col = tl.minimum(
+            tl.maximum(final_num_computed - 1, 0) // mamba_block_size,
+            block_table_width - 1,
+        )
         final_state_idx = tl.load(
             block_table_ptr + request_idx * stride_block_table_row + final_state_col * stride_block_table_col
         ).to(tl.int64)

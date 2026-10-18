@@ -4,17 +4,16 @@
 import copy
 import functools
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, Self, get_args
 
 from pydantic import Field, SkipValidation, field_validator, model_validator
-from typing_extensions import Self
 
 from aphrodite.config.cache import CacheDType
 from aphrodite.config.kernel import MoEBackend
 from aphrodite.config.load import LoadConfig
 from aphrodite.config.model import HfOverrides, ModelConfig
 from aphrodite.config.parallel import ParallelConfig
-from aphrodite.config.utils import config
+from aphrodite.config.utils import config, replace
 from aphrodite.logger import init_logger
 from aphrodite.transformers_utils.config import get_hf_text_config
 from aphrodite.utils.hashing import safe_hash
@@ -22,11 +21,13 @@ from aphrodite.utils.import_utils import LazyLoader, has_arctic_inference
 from aphrodite.v1.attention.backends.registry import AttentionBackendEnum
 
 if TYPE_CHECKING:
-    from transformers import PretrainedConfig
+    from transformers import PreTrainedConfig
 
     import aphrodite.model_executor.layers.quantization as me_quant
+    from aphrodite.config.aphrodite import AphroditeConfig
 else:
-    PretrainedConfig = Any
+    PreTrainedConfig = Any
+    AphroditeConfig = Any
 
     me_quant = LazyLoader("model_executor", globals(), "aphrodite.model_executor.layers.quantization")
 
@@ -83,8 +84,6 @@ DSparkModelTypes = Literal["dspark"]
 EagleModelTypes = Literal["eagle", "eagle3", "extract_hidden_states", MTPModelTypes, DFlashModelTypes]
 SpeculativeMethod = Literal[
     "ngram",
-    "medusa",
-    "mlp_speculator",
     "draft_model",
     "suffix",
     "custom_class",
@@ -340,6 +339,17 @@ def _validate_qwen3_omni_dspark(
         )
 
 
+# (SpeculativeConfig field, AphroditeConfig sub-config, overridden field)
+_DRAFT_APHRODITE_CONFIG_OVERRIDES = (
+    # Otherwise the draft inherits the target's --moe-backend, which fails
+    # when the draft is unquantized and that backend is not.
+    ("moe_backend", "kernel_config", "moe_backend"),
+    # Only when set, so the draft keeps a KV cache layout the target shares.
+    ("attention_backend", "attention_config", "backend"),
+    ("kv_cache_dtype", "cache_config", "cache_dtype"),
+)
+
+
 @config
 class SpeculativeConfig:
     """Configuration for speculative decoding."""
@@ -411,6 +421,12 @@ class SpeculativeConfig:
     speculative methods. This is an experimental option for measuring the
     acceptance-rate impact of reusing that block. It does not disable the
     speculative drafter itself."""
+    draft_lm_head_quantization: Literal["fp8", "nvfp4"] | None = None
+    """Quantize the drafter's copy of a target lm_head it shares (EAGLE and
+    MTP). "fp8" uses per-row weight and per-token activation scales on the
+    platform's FP8 linear kernel; "nvfp4" is weight-only on the platform's
+    W4A16 kernel. The target verifies with its own head, so only the
+    acceptance length can change. Model Runner V2 only."""
     use_local_argmax_reduction: bool = False
     """Use vocab-parallel local argmax instead of all-gathering full logits
     for draft token generation. Reduces communication from O(vocab_size) to
@@ -556,8 +572,7 @@ class SpeculativeConfig:
     top-k base-logit candidates. Requires draft tensor parallel size 1."""
 
     def compute_hash(self) -> str:
-        """
-        WARNING: Whenever a new field is added to this config,
+        """WARNING: Whenever a new field is added to this config,
         ensure that it is included in the factors list if
         it affects the computation graph.
 
@@ -577,17 +592,18 @@ class SpeculativeConfig:
             "dspark",
         )
         factors.append(uses_aux_hidden_states)
+        if self.method == "dspark":
+            factors.append(self.enable_adaptive_verification)
 
-        if uses_aux_hidden_states and self.draft_model_config is not None:
+        if self.draft_model_config is not None:
             factors.append(self.draft_model_config.compute_hash())
-
             # The specific layers used also affect the computation graph.
             layer_ids = getattr(
                 self.draft_model_config.hf_config,
                 "eagle_aux_hidden_state_layer_ids",
                 None,
             )
-            if layer_ids is not None:
+            if layer_ids is not None and uses_aux_hidden_states:
                 # Convert to tuple to make it hashable
                 factors.append(tuple(layer_ids))
 
@@ -604,7 +620,7 @@ class SpeculativeConfig:
         return hash_str
 
     @staticmethod
-    def hf_config_override(hf_config: PretrainedConfig) -> PretrainedConfig:
+    def hf_config_override(hf_config: PreTrainedConfig) -> PreTrainedConfig:
         initial_architecture = hf_config.architectures[0]
         use_v32_mtp = hf_config.model_type in ("deepseek_v32", "glm_moe_dsa")
         if hf_config.model_type == "dots3_note":
@@ -634,11 +650,19 @@ class SpeculativeConfig:
                     "architectures": ["DeepseekV32MTPModel" if use_v32_mtp else "DeepSeekMTPModel"],
                 }
             )
-        if hf_config.model_type == "deepseek_v4":
+        if hf_config.model_type in ("deepseek_v4", "deepseek_v41"):
+            # V4.1 has no classic-MTP draft: its checkpoints ship DSpark stages
+            # under ``mtp.*``, so only V4 gets an MTP architecture here. The
+            # DSpark path rewrites ``architectures`` itself;
+            # ``method="mtp"`` on V4.1 is rejected below.
+            is_v41 = hf_config.model_type == "deepseek_v41"
             hf_config.model_type = "deepseek_mtp"
 
             n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
-            hf_config.update({"n_predict": n_predict, "architectures": ["DeepSeekV4MTPModel"]})
+            overrides = {"n_predict": n_predict}
+            if not is_v41:
+                overrides["architectures"] = ["DeepSeekV4MTPModel"]
+            hf_config.update(overrides)
         if hf_config.model_type in ("pangu_ultra_moe"):
             hf_config.model_type = "pangu_ultra_moe_mtp"
         if hf_config.model_type == "pangu_ultra_moe_mtp":
@@ -795,7 +819,15 @@ class SpeculativeConfig:
             )
 
         architectures = getattr(hf_config, "architectures", []) or []
-        if initial_architecture == "BailingMoeV3ForCausalLM":
+        if initial_architecture == "BailingMoeV3VLForConditionalGeneration":
+            quantization_config = getattr(hf_config, "quantization_config", None)
+            hf_config = copy.deepcopy(hf_config.text_config)
+            if quantization_config is not None and getattr(hf_config, "quantization_config", None) is None:
+                hf_config.quantization_config = copy.deepcopy(quantization_config)
+        if initial_architecture in (
+            "BailingMoeV3ForCausalLM",
+            "BailingMoeV3VLForConditionalGeneration",
+        ):
             hf_config.model_type = "bailing_hybrid_v3_mtp"
         elif hf_config.model_type == "bailing_hybrid" or "BailingMoeV2_5ForCausalLM" in architectures:
             hf_config.model_type = "bailing_hybrid_mtp"
@@ -838,6 +870,9 @@ class SpeculativeConfig:
             is_moe = hf_config.model_type in ("qwen3_5_moe", "qwen3_5_moe_text")
             hf_config.model_type = "qwen3_5_mtp"
             n_predict = getattr(hf_config, "mtp_num_hidden_layers", None)
+            if n_predict is None:
+                text_config = get_hf_text_config(hf_config)
+                n_predict = getattr(text_config, "mtp_num_hidden_layers", None)
             hf_config.update(
                 {
                     "n_predict": n_predict,
@@ -862,7 +897,7 @@ class SpeculativeConfig:
                     "architectures": [architecture],
                 }
             )
-        if hf_config.model_type in ("longcat_flash", "longcat_flash_ngram"):
+        if hf_config.model_type == "longcat_flash":
             hf_config.model_type = "longcat_flash_mtp"
             n_predict = getattr(hf_config, "num_nextn_predict_layers", 1)
             hf_config.update({"n_predict": n_predict, "architectures": ["LongCatFlashMTPModel"]})
@@ -938,23 +973,30 @@ class SpeculativeConfig:
             hf_config.update({"n_predict": n_predict, "architectures": ["MiniMaxM3MTP"]})
         if hf_config.model_type == "glm5_next":
             hf_config.model_type = "glm5_next_mtp"
-            n_predict = hf_config.num_nextn_predict_layers
-            hf_config.update({"n_predict": n_predict, "architectures": ["Glm5NextMTPModel"]})
+            text_config = hf_config.get_text_config()
+            share_mtp_indices = getattr(text_config, "index_share_for_mtp_iteration", False)
+            hf_config.update(
+                {
+                    "n_predict": text_config.num_nextn_predict_layers,
+                    "architectures": ["Glm5NextMTPModel"],
+                    "index_share_for_mtp_iteration": share_mtp_indices,
+                }
+            )
 
         return hf_config
 
     @staticmethod
     def _apply_composed_hf_override(
-        target_hf_overrides: Callable[[PretrainedConfig], PretrainedConfig],
-        hf_config: PretrainedConfig,
-    ) -> PretrainedConfig:
+        target_hf_overrides: Callable[[PreTrainedConfig], PreTrainedConfig],
+        hf_config: PreTrainedConfig,
+    ) -> PreTrainedConfig:
         hf_config = SpeculativeConfig.hf_config_override(hf_config)
         return target_hf_overrides(hf_config)
 
     @staticmethod
     def compose_draft_hf_overrides(
         target_hf_overrides: HfOverrides | None,
-    ) -> Callable[[PretrainedConfig], PretrainedConfig]:
+    ) -> Callable[[PreTrainedConfig], PreTrainedConfig]:
         """Build the ``hf_overrides`` for the draft ``ModelConfig``.
 
         Callable overrides on the target are config-to-config transforms
@@ -1123,17 +1165,10 @@ class SpeculativeConfig:
             self.prompt_lookup_min = 0
 
             if self.model is not None:
-                # Old-format Medusa checkpoints (e.g. FasterDecoding/medusa-*)
-                # lack a model_type key in config.json, so AutoConfig cannot
-                # detect them. When the method is explicitly "medusa", inject
-                # model_type so MedusaConfig.from_pretrained is used instead.
-                draft_hf_overrides: HfOverrides
-                if self.method == "medusa":
-                    draft_hf_overrides = {"model_type": "medusa"}
-                else:
-                    draft_hf_overrides = SpeculativeConfig.compose_draft_hf_overrides(
-                        self.target_model_config.hf_overrides
-                    )
+                # Compose any callable hf_overrides set on the target so the
+                # draft config receives the same transform (e.g. the test
+                # shrink). Dict overrides stay target-only.
+                draft_hf_overrides = SpeculativeConfig.compose_draft_hf_overrides(self.target_model_config.hf_overrides)
                 self.draft_model_config = ModelConfig(
                     model=self.model,
                     runner="draft",
@@ -1155,17 +1190,6 @@ class SpeculativeConfig:
                     hf_overrides=draft_hf_overrides,
                     config_format=self.target_model_config.config_format,
                 )
-
-                # Old-format Medusa checkpoints (e.g. FasterDecoding/medusa-*)
-                # omit vocab_size in config.json, so MedusaConfig falls back to
-                # its default (32001). Align with the target model's vocab size
-                # to avoid shape mismatches when loading LM-head weights.
-                if self.method == "medusa":
-                    target_vocab = self.target_model_config.hf_config.vocab_size
-                    draft_hf = self.draft_model_config.hf_config
-                    if draft_hf.vocab_size != target_vocab:
-                        draft_hf.vocab_size = target_vocab
-                        draft_hf.truncated_vocab_size = target_vocab
 
                 # Automatically detect the method
                 if self.method in ("eagle", "eagle3", "dflash", "dspark"):
@@ -1195,12 +1219,19 @@ class SpeculativeConfig:
                     )
                 ):
                     self.method = "dspark"
-                elif self.draft_model_config.hf_config.model_type == "medusa":
-                    self.method = "medusa"
-                elif self.draft_model_config.hf_config.model_type == "mlp_speculator":
-                    self.method = "mlp_speculator"
                 elif self.draft_model_config.hf_config.model_type in get_args(MTPModelTypes):
                     self.method = "mtp"
+                    if (
+                        self.target_model_config is not None
+                        and self.target_model_config.hf_config.model_type == "deepseek_v41"
+                    ):
+                        raise ValueError(
+                            "DeepSeek V4.1 has no classic-MTP draft: its "
+                            "checkpoints ship DSpark stages under mtp.* "
+                            "(main_proj/markov_head/confidence_head) and carry "
+                            "no e_proj/h_proj/enorm/hnorm/hc_head weights. Use "
+                            "speculative method 'dspark' instead of 'mtp'."
+                        )
                     if self.num_speculative_tokens > 1 and self.draft_model_config.hf_config.model_type not in (
                         "step3p5_mtp",
                         "inkling_mtp",
@@ -1258,10 +1289,12 @@ class SpeculativeConfig:
                     and "Gemma4DSparkModel" not in self.draft_model_config.architectures
                     and "K3DSparkModel" not in self.draft_model_config.architectures
                 ):
-                    # DeepSeek-V4 DSpark reuses the full DeepSeek-V4 config
+                    # DeepSeek-V4(.1) DSpark reuses the full target config
                     # and its weights ship in the target checkpoint.
-                    self.draft_model_config.hf_config.model_type = "deepseek_v4"
-                    self.draft_model_config.hf_config.architectures = ["DSparkDraftModel"]
+                    is_v41 = self.target_model_config.hf_config.model_type == "deepseek_v41"
+                    draft_hf_config = self.draft_model_config.hf_config
+                    draft_hf_config.model_type = "deepseek_v41" if is_v41 else "deepseek_v4"
+                    draft_hf_config.architectures = ["DSparkV41DraftModel" if is_v41 else "DSparkDraftModel"]
                     self.draft_model_config.quantization = self.target_model_config.quantization
                     self.update_arch_()
                 elif self.method == "dspark" and "Gemma4DSparkModel" in self.draft_model_config.architectures:
@@ -1273,19 +1306,20 @@ class SpeculativeConfig:
                         and getattr(hf, "target_layer_ids", None) is not None
                     ):
                         hf.dspark_target_layer_ids = hf.target_layer_ids
-                    if getattr(hf, "n_predict", None) is None and getattr(hf, "block_size", None) is not None:
-                        hf.n_predict = hf.block_size
 
                 if self.method in ("dflash", "dspark"):
                     self.parallel_drafting = True
 
-                if self.num_speculative_tokens is not None and hasattr(
-                    self.draft_model_config.hf_config, "num_lookahead_tokens"
-                ):
-                    self.draft_model_config.hf_config.num_lookahead_tokens = self.num_speculative_tokens
-
                 n_predict = getattr(self.draft_model_config.hf_config, "n_predict", None)
-                if n_predict is not None:
+                if self.use_dspark():
+                    if self.num_speculative_tokens is None:
+                        # DSpark's parallel width is independent of MTP stages.
+                        hf_config = self.draft_model_config.hf_config
+                        block_size = getattr(hf_config, "block_size", None)
+                        if block_size is None:
+                            block_size = getattr(hf_config, "dspark_block_size", None)
+                        self.num_speculative_tokens = block_size
+                elif n_predict is not None:
                     if self.num_speculative_tokens is None:
                         # Default to max value defined in draft model config.
                         self.num_speculative_tokens = n_predict
@@ -1333,7 +1367,6 @@ class SpeculativeConfig:
                 self.draft_tensor_parallel_size = SpeculativeConfig._verify_and_get_draft_tp(
                     self.target_parallel_config,
                     self.draft_tensor_parallel_size,
-                    self.draft_model_config.hf_config,
                 )
                 self.draft_model_config.max_model_len = SpeculativeConfig._maybe_override_draft_max_model_len(
                     self.max_model_len,
@@ -1341,8 +1374,12 @@ class SpeculativeConfig:
                     self.target_model_config.max_model_len,
                 )
 
+                # Use the final draft config, after any architecture overrides,
+                # so EP agrees with ModelConfig's expert-count validation.
                 self.draft_parallel_config = SpeculativeConfig.create_draft_parallel_config(
-                    self.target_parallel_config, self.draft_tensor_parallel_size
+                    self.target_parallel_config,
+                    self.draft_tensor_parallel_size,
+                    draft_model_config=self.draft_model_config,
                 )
 
         if self.index_share_for_mtp_iteration is not None:
@@ -1350,8 +1387,12 @@ class SpeculativeConfig:
                 raise ValueError("index_share_for_mtp_iteration is only supported with method='mtp'")
             self.draft_model_config.hf_config.index_share_for_mtp_iteration = self.index_share_for_mtp_iteration
 
-        if self.method != "dspark" and self.enable_adaptive_verification:
-            raise ValueError("Adaptive verification only supported with DSpark")
+        if self.method != "dspark" and self.enable_adaptive_verification and self.use_local_argmax_reduction:
+            raise ValueError(
+                "Adaptive verification estimates per-position acceptance from "
+                "the draft logits, which use_local_argmax_reduction never "
+                "materializes. Disable one of them."
+            )
 
         return self
 
@@ -1397,7 +1438,6 @@ class SpeculativeConfig:
         speculative_max_model_len is mainly used for testing that sequences can
         skip speculation.
         """
-
         if speculative_max_model_len is not None:
             if speculative_max_model_len > draft_max_model_len:
                 raise ValueError(f"{speculative_max_model_len=} cannot be larger than {draft_max_model_len=}")
@@ -1421,7 +1461,7 @@ class SpeculativeConfig:
 
     @staticmethod
     def _maybe_override_draft_max_position_embeddings(
-        draft_hf_config: PretrainedConfig,
+        draft_hf_config: PreTrainedConfig,
         target_max_model_len: int,
     ) -> None:
         """Raise an EAGLE draft's max position embeddings to the target's.
@@ -1434,6 +1474,7 @@ class SpeculativeConfig:
         Args:
             draft_hf_config: The draft model's HF config, mutated in place.
             target_max_model_len: The target model's max_model_len.
+
         """
         draft_max_position_embeddings = getattr(draft_hf_config, "max_position_embeddings", None)
         if draft_max_position_embeddings is None or draft_max_position_embeddings >= target_max_model_len:
@@ -1451,24 +1492,14 @@ class SpeculativeConfig:
     def _verify_and_get_draft_tp(
         target_parallel_config: ParallelConfig,
         speculative_draft_tensor_parallel_size: int | None,
-        draft_hf_config: PretrainedConfig,
     ) -> int:
-        """
-        Verifies and adjusts the tensor parallel size for a draft model
+        """Verifies and adjusts the tensor parallel size for a draft model
         specified using speculative_draft_tensor_parallel_size.
         """
         # If speculative_draft_tensor_parallel_size is unset then set it
         # appropriately else verify that it is set correctly.
         if speculative_draft_tensor_parallel_size is None:
-            if draft_hf_config.model_type == "mlp_speculator":
-                speculative_draft_tensor_parallel_size = 1
-                if target_parallel_config.tensor_parallel_size > 1:
-                    logger.warning(
-                        "%s cannot currently be run with tp>1; setting speculative_draft_tensor_parallel_size=1",
-                        draft_hf_config.model_type,
-                    )
-            else:
-                speculative_draft_tensor_parallel_size = target_parallel_config.tensor_parallel_size
+            speculative_draft_tensor_parallel_size = target_parallel_config.tensor_parallel_size
         elif speculative_draft_tensor_parallel_size not in (
             1,
             target_parallel_config.tensor_parallel_size,
@@ -1480,8 +1511,7 @@ class SpeculativeConfig:
         return speculative_draft_tensor_parallel_size
 
     def update_arch_(self):
-        """
-        EagleConfig and ExtractHiddenStatesConfig update architectures, so update all
+        """EagleConfig and ExtractHiddenStatesConfig update architectures, so update all
         architectures-related fields in self.draft_model_config
         """
         self.draft_model_config.hf_text_config = get_hf_text_config(self.draft_model_config.hf_config)
@@ -1497,14 +1527,21 @@ class SpeculativeConfig:
     def create_draft_parallel_config(
         target_parallel_config: ParallelConfig,
         speculative_draft_tensor_parallel_size: int,
+        draft_model_config: ModelConfig | None = None,
     ) -> ParallelConfig:
         """Create a parallel config for use by the draft worker.
 
-        This is mostly a copy of the target parallel config, except the tp_size.
+        Use the draft TP size and disable inherited EP for known dense drafts.
+        Without a draft model config, preserve the previous EP inheritance.
         """
+        enable_ep = target_parallel_config.enable_expert_parallel
+        if draft_model_config is not None:
+            enable_ep = enable_ep and draft_model_config.is_moe
+
         draft_parallel_config = ParallelConfig(
             pipeline_parallel_size=1,
             tensor_parallel_size=speculative_draft_tensor_parallel_size,
+            enable_expert_parallel=enable_ep,
             distributed_executor_backend=target_parallel_config.distributed_executor_backend,
             max_parallel_loading_workers=target_parallel_config.max_parallel_loading_workers,
             disable_custom_all_reduce=target_parallel_config.disable_custom_all_reduce,
@@ -1513,6 +1550,18 @@ class SpeculativeConfig:
         )  # type: ignore[call-arg]
 
         return draft_parallel_config
+
+    def apply_draft_overrides(self, aphrodite_config: AphroditeConfig) -> AphroditeConfig:
+        """Overlay this config's kernel overrides onto a target AphroditeConfig.
+
+        Only non-None fields override, so an unset field keeps whatever the
+        target resolved.
+        """
+        for src, config_name, dst in _DRAFT_APHRODITE_CONFIG_OVERRIDES:
+            if (value := getattr(self, src)) is not None:
+                sub_config = replace(getattr(aphrodite_config, config_name), **{dst: value})
+                aphrodite_config = replace(aphrodite_config, **{config_name: sub_config})
+        return aphrodite_config
 
     @field_validator("attention_backend", mode="before")
     @classmethod
@@ -1537,6 +1586,17 @@ class SpeculativeConfig:
                 "speculative model unless the draft model config contains an "
                 "n_predict parameter."
             )
+
+        if self.draft_lm_head_quantization is not None:
+            # Gemma-4 MTP scores tied embedding rows directly; no lm_head to share.
+            if self.method not in ("eagle", "eagle3", "mtp") or self.use_gemma4_mtp():
+                raise ValueError(f"draft_lm_head_quantization is not supported for method {self.method!r}.")
+            draft = self.draft_model_config
+            if draft is not None and draft.head_dtype != draft.dtype:
+                raise ValueError(
+                    "draft_lm_head_quantization needs the lm_head to run in the "
+                    f"model dtype, got head_dtype={draft.head_dtype}."
+                )
 
         if self.num_speculative_tokens <= 0:
             raise ValueError(
@@ -1603,19 +1663,21 @@ class SpeculativeConfig:
         ==================== ============= ======== ================
         EAGLE3               eagle3        No       0
         P-EAGLE              eagle3        Yes      K - 1
-        DFlash               dflash        Yes      K
-        DSpark               dspark        Yes      K - 1
+        DFlash               dflash        Yes      0
+        DSpark               dspark        Yes      0
         MTP                  mtp           No       0
         N-gram               ngram         No       0
         Draft model          draft_model   No       1
         PARD                 draft_model   Yes      K
         ==================== ============= ======== ================
+
+        DFlash and DSpark draft in a separate query pass rather than adding
+        rows to the target batch.
         """
         num_draft_tokens = self.num_speculative_tokens
 
-        if self.use_dflash():
-            # DFlash uses one bonus query followed by K mask queries.
-            return num_draft_tokens
+        if self.use_dflash() or self.use_dspark():
+            return 0
 
         if self.parallel_drafting:
             if self.uses_draft_model():
@@ -1668,11 +1730,17 @@ class SpeculativeConfig:
     def uses_draft_model(self) -> bool:
         return self.method == "draft_model"
 
+    def uses_draft_kv_cache(self) -> bool:
+        return self.use_eagle() or self.uses_draft_model() or self.uses_extract_hidden_states()
+
     def uses_extract_hidden_states(self) -> bool:
         return self.method == "extract_hidden_states"
 
     def use_ngram_gpu(self) -> bool:
         return self.method == "ngram_gpu"
+
+    def use_ngram(self) -> bool:
+        return self.method in ("ngram", "ngram_gpu")
 
     def use_multi_module_mtp(self) -> bool:
         if self.method != "mtp" or self.draft_model_config is None:

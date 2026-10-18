@@ -35,6 +35,7 @@ from aphrodite.distributed.parallel_state import (
 )
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.layers.attention import Attention
+from aphrodite.model_executor.layers.layernorm import LayerNorm
 from aphrodite.model_executor.layers.linear import (
     ColumnParallelLinear,
     QKVParallelLinear,
@@ -156,9 +157,9 @@ class GPT2Block(nn.Module):
         hidden_size = config.hidden_size
         inner_dim = config.n_inner if config.n_inner is not None else 4 * hidden_size
 
-        self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
+        self.ln_1 = LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.attn = GPT2Attention(config, cache_config, quant_config, prefix=f"{prefix}.attn")
-        self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
+        self.ln_2 = LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
         self.mlp = GPT2MLP(inner_dim, config, quant_config, prefix=f"{prefix}.mlp")
 
     def forward(
@@ -208,7 +209,7 @@ class GPT2Model(nn.Module):
             lambda prefix: GPT2Block(config, cache_config, quant_config, prefix=prefix),
             prefix=f"{prefix}.h",
         )
-        self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
+        self.ln_f = LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
         self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(["hidden_states"], config.n_embd)
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -309,6 +310,7 @@ class GPT2ForSequenceClassification(nn.Module, SupportsCrossEncoding):
         transformer: An instance of GPT2Model used for forward operations.
         score: A layer for calculating logits.
         _pooler: An instance of Pooler used for pooling operations.
+
     """
 
     is_pooling_model = True

@@ -16,7 +16,7 @@ use aphrodite_tokenizer::Tokenizer;
 use crate::backend::{SamplingHints, SamplingLimits};
 use crate::error::{Error, Result};
 use crate::request::{SamplingParams, TextRequest};
-use logprobs::validate_logprobs;
+use logprobs::{lower_prompt_logprob_token_ids, validate_logprobs};
 use sampling::validate_resolved_sampling_params;
 use token_ids::{validate_prompt_token_ids, validate_vocab_range};
 
@@ -50,7 +50,12 @@ pub fn lower_text_request(
         // multimodal tensor payloads.
         mm_features: request.mm_features.take(),
         sampling_params: lower_sampling_params(
-            request.sampling_params.clone(),
+            SamplingParams {
+                // Move the candidate table rather than cloning it; only lowering reads it.
+                prompt_logprob_token_ids: request.sampling_params.prompt_logprob_token_ids.take(),
+                aphrodite_sampling: std::mem::take(&mut request.sampling_params.aphrodite_sampling),
+                ..request.sampling_params.clone()
+            },
             sampling_hints,
             sampling_limits,
             prompt_len,
@@ -60,7 +65,9 @@ pub fn lower_text_request(
         priority: request.priority,
         data_parallel_rank: request.data_parallel_rank,
         session_id: request.session_id.clone(),
-        reasoning_parser_kwargs: request.reasoning_parser_kwargs.clone(),
+        kv_hints: request.kv_hints.clone(),
+        reasoning_parser_kwargs: Some(request.reasoning_parser_kwargs.clone()),
+        reasoning_ended: request.reasoning_ended,
         lora_request: request.lora_request.clone(),
         arrival_time: request.arrival_time,
         trace_headers: None,
@@ -92,6 +99,7 @@ pub fn lower_sampling_params(
 ) -> Result<EngineCoreSamplingParams> {
     let SamplingParams {
         temperature,
+        watermarking,
         top_p,
         top_k,
         seed,
@@ -100,6 +108,8 @@ pub fn lower_sampling_params(
         thinking_token_budget,
         logprobs,
         prompt_logprobs,
+        prompt_logprob_token_ids,
+        prompt_logprob_start,
         min_p,
         frequency_penalty,
         presence_penalty,
@@ -110,16 +120,21 @@ pub fn lower_sampling_params(
         logit_bias,
         allowed_token_ids,
         bad_words,
+        bad_words_token_ids,
         logprob_token_ids,
         structured_outputs,
         skip_reading_prefix_cache,
         aphrodite_xargs,
+        stream_interval,
+        mut aphrodite_sampling,
     } = sampling_params;
 
     validate_logprobs(
         logprobs,
         prompt_logprobs,
         logprob_token_ids.as_deref(),
+        prompt_logprob_token_ids.as_deref(),
+        prompt_logprob_start,
         sampling_limits,
     )?;
     validate_repetition_detection(repetition_detection.as_ref())?;
@@ -162,8 +177,26 @@ pub fn lower_sampling_params(
         merge_unique_token_ids(&mut stop_token_ids, extra_eos_token_ids.iter().copied());
     }
 
+    let mut bad_words_token_ids = bad_words_token_ids.unwrap_or_default();
+    if let Some(tokenized) = tokenize_bad_words(bad_words.as_deref(), tokenizer)? {
+        bad_words_token_ids.extend(tokenized);
+    }
+
+    if aphrodite_sampling.dry_sequence_breaker_ids.is_empty()
+        && let Some(breakers) = &aphrodite_sampling.dry_sequence_breakers
+    {
+        for breaker in breakers {
+            // Match SamplingParams.update_from_tokenizer(): the final token of
+            // "a{breaker}" identifies the repetition-window separator.
+            if let Some(&token_id) = tokenizer.encode(&format!("a{breaker}"), false)?.last() {
+                aphrodite_sampling.dry_sequence_breaker_ids.push(token_id);
+            }
+        }
+    }
+
     let params = EngineCoreSamplingParams {
         temperature,
+        watermarking,
         top_p,
         top_k,
         seed,
@@ -172,6 +205,13 @@ pub fn lower_sampling_params(
         thinking_token_budget,
         logprobs,
         prompt_logprobs,
+        prompt_logprob_token_ids: lower_prompt_logprob_token_ids(
+            prompt_logprob_token_ids,
+            prompt_logprob_start,
+            prompt_len,
+            sampling_limits.model_vocab_size,
+        )?,
+        prompt_logprob_start,
         min_p,
         frequency_penalty,
         presence_penalty,
@@ -182,13 +222,15 @@ pub fn lower_sampling_params(
         all_stop_token_ids,
         logit_bias,
         allowed_token_ids,
-        bad_words_token_ids: tokenize_bad_words(bad_words.as_deref(), tokenizer)?,
+        bad_words_token_ids: (!bad_words_token_ids.is_empty()).then_some(bad_words_token_ids),
         // TODO: Validate structured-output schemas and regexes before submitting requests to engine-core.
         structured_outputs,
         logprob_token_ids,
         skip_reading_prefix_cache,
         extra_args: aphrodite_xargs,
         routed_experts_prompt_start: 0,
+        stream_interval,
+        aphrodite_sampling,
     };
     validate_resolved_sampling_params(&params)?;
     validate_vocab_range(&params, &sampling_limits)?;
@@ -316,8 +358,13 @@ fn merge_unique_token_ids(
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeSet, HashMap};
+    use std::num::NonZeroU32;
 
-    use aphrodite_engine_core_client::protocol::multimodal::{MmFeatureSpec, PlaceholderRange};
+    use aphrodite_engine_core_client::protocol::kv_hints::{KvHintAction, KvHintsEnvelope};
+    use aphrodite_engine_core_client::protocol::multimodal::{
+        MmFeatureSpec, MmModality, PlaceholderRange,
+    };
+    use aphrodite_engine_core_client::protocol::tensor::WireNdArray;
     use aphrodite_tokenizer::test_utils::TestTokenizer;
     use serial_test::file_serial;
 
@@ -381,6 +428,25 @@ mod tests {
             3,
             &stub_tokenizer(),
         )
+    }
+
+    #[test]
+    fn lower_sampling_params_resolves_dry_breakers_and_preserves_phrase_retry() {
+        let sampling_params: SamplingParams = serde_json::from_value(serde_json::json!({
+            "dry_multiplier": 0.8,
+            "dry_sequence_breakers": ["\n", ":"],
+            "xtc_probability": 0.2,
+            "aphrodite_xargs": {"_sonar_phrase_retry": true}
+        }))
+        .unwrap();
+        let params =
+            lower_sampling_params_with_limits(sampling_params, sample_sampling_limits()).unwrap();
+        assert_eq!(
+            params.aphrodite_sampling.dry_sequence_breaker_ids,
+            vec![10, 58]
+        );
+        assert_eq!(params.aphrodite_sampling.xtc_probability, 0.2);
+        assert_eq!(params.extra_args.unwrap()["_sonar_phrase_retry"], true);
     }
 
     #[test]
@@ -630,6 +696,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 1.0,
+                watermarking: true,
                 top_p: 1.0,
                 top_k: 0,
                 seed: None,
@@ -638,6 +705,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.0,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -661,6 +730,37 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
+                aphrodite_sampling: AphroditeSamplingParams {
+                    no_repeat_ngram_size: 0,
+                    dynatemp_min: 0.0,
+                    dynatemp_max: 0.0,
+                    dynatemp_exponent: 1.0,
+                    temperature_last: false,
+                    top_a: 0.0,
+                    tfs: 1.0,
+                    eta_cutoff: 0.0,
+                    epsilon_cutoff: 0.0,
+                    typical_p: 1.0,
+                    smoothing_factor: 0.0,
+                    smoothing_curve: 1.0,
+                    xtc_threshold: 0.1,
+                    xtc_probability: 0.0,
+                    nsigma: 0.0,
+                    mirostat_mode: 0,
+                    mirostat_tau: 0.0,
+                    mirostat_eta: 0.0,
+                    dry_multiplier: 0.0,
+                    dry_base: 1.75,
+                    dry_allowed_length: 2,
+                    dry_sequence_breakers: None,
+                    dry_sequence_breaker_ids: [],
+                    dry_range: 0,
+                    dry_max_ngram: 12,
+                    dry_max_occurrences: 8,
+                    dry_early_exit_match_len: 8,
+                    skew: 0.0,
+                },
             }
         "#]]
         .assert_debug_eq(&params);
@@ -684,6 +784,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 1.0,
+                watermarking: true,
                 top_p: 1.0,
                 top_k: 0,
                 seed: None,
@@ -692,6 +793,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.0,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -711,6 +814,37 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
+                aphrodite_sampling: AphroditeSamplingParams {
+                    no_repeat_ngram_size: 0,
+                    dynatemp_min: 0.0,
+                    dynatemp_max: 0.0,
+                    dynatemp_exponent: 1.0,
+                    temperature_last: false,
+                    top_a: 0.0,
+                    tfs: 1.0,
+                    eta_cutoff: 0.0,
+                    epsilon_cutoff: 0.0,
+                    typical_p: 1.0,
+                    smoothing_factor: 0.0,
+                    smoothing_curve: 1.0,
+                    xtc_threshold: 0.1,
+                    xtc_probability: 0.0,
+                    nsigma: 0.0,
+                    mirostat_mode: 0,
+                    mirostat_tau: 0.0,
+                    mirostat_eta: 0.0,
+                    dry_multiplier: 0.0,
+                    dry_base: 1.75,
+                    dry_allowed_length: 2,
+                    dry_sequence_breakers: None,
+                    dry_sequence_breaker_ids: [],
+                    dry_range: 0,
+                    dry_max_ngram: 12,
+                    dry_max_occurrences: 8,
+                    dry_early_exit_match_len: 8,
+                    skew: 0.0,
+                },
             }
         "#]]
         .assert_debug_eq(&params);
@@ -720,7 +854,7 @@ mod tests {
     fn lower_text_request_moves_multimodal_features_to_generate_request() {
         let features = vec![MmFeatureSpec {
             data: None,
-            modality: "image".to_string(),
+            modality: MmModality::Image,
             identifier: "image-1".to_string(),
             mm_position: PlaceholderRange {
                 offset: 2,
@@ -800,7 +934,8 @@ mod tests {
     #[file_serial(hf_qwen3)]
     async fn lower_text_request_uses_real_qwen_generation_defaults() {
         let model_id = "Qwen/Qwen3-0.6B";
-        let files = ResolvedModelFiles::new(model_id).await.expect("resolve qwen model files");
+        let files =
+            ResolvedModelFiles::new(model_id, None).await.expect("resolve qwen model files");
         let backend = HfTextBackend::from_resolved_model_files(
             files,
             model_id.to_string(),
@@ -851,6 +986,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 0.6,
+                watermarking: true,
                 top_p: 0.95,
                 top_k: 20,
                 seed: None,
@@ -859,6 +995,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.0,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -882,6 +1020,37 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
+                aphrodite_sampling: AphroditeSamplingParams {
+                    no_repeat_ngram_size: 0,
+                    dynatemp_min: 0.0,
+                    dynatemp_max: 0.0,
+                    dynatemp_exponent: 1.0,
+                    temperature_last: false,
+                    top_a: 0.0,
+                    tfs: 1.0,
+                    eta_cutoff: 0.0,
+                    epsilon_cutoff: 0.0,
+                    typical_p: 1.0,
+                    smoothing_factor: 0.0,
+                    smoothing_curve: 1.0,
+                    xtc_threshold: 0.1,
+                    xtc_probability: 0.0,
+                    nsigma: 0.0,
+                    mirostat_mode: 0,
+                    mirostat_tau: 0.0,
+                    mirostat_eta: 0.0,
+                    dry_multiplier: 0.0,
+                    dry_base: 1.75,
+                    dry_allowed_length: 2,
+                    dry_sequence_breakers: None,
+                    dry_sequence_breaker_ids: [],
+                    dry_range: 0,
+                    dry_max_ngram: 12,
+                    dry_max_occurrences: 8,
+                    dry_early_exit_match_len: 8,
+                    skew: 0.0,
+                },
             }
         "#]]
         .assert_debug_eq(&params);
@@ -915,6 +1084,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 1.0,
+                watermarking: true,
                 top_p: 1.0,
                 top_k: 0,
                 seed: None,
@@ -923,6 +1093,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.0,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -950,6 +1122,7 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
             }
         "#]]
         .assert_debug_eq(&params);
@@ -987,6 +1160,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 0.2,
+                watermarking: true,
                 top_p: 0.3,
                 top_k: 4,
                 seed: None,
@@ -995,6 +1169,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.1,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -1011,6 +1187,7 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
             }
         "#]]
         .assert_debug_eq(&params);
@@ -1110,6 +1287,51 @@ mod tests {
     }
 
     #[test]
+    fn lower_sampling_params_validates_prompt_logprob_token_ids() {
+        let lower = |ids: Option<Vec<Vec<i32>>>, start: Option<u32>| {
+            lower_sampling_params_with_limits(
+                SamplingParams {
+                    prompt_logprob_token_ids: ids,
+                    prompt_logprob_start: start,
+                    ..Default::default()
+                },
+                sample_sampling_limits(),
+            )
+        };
+        let rejects = |ids, start| match lower(ids, start) {
+            Err(error) => error.to_string(),
+            Ok(_) => panic!("expected rejection"),
+        };
+
+        let params = lower(Some(vec![vec![1, 2], vec![3]]), None).unwrap();
+        assert_eq!(
+            params.prompt_logprob_token_ids,
+            Some(WireNdArray::from_i32(vec![2, 2], vec![1, 2, 3, -1]).unwrap())
+        );
+        assert_eq!(
+            lower(Some(vec![vec![5]]), Some(1)).unwrap().prompt_logprob_start,
+            Some(1)
+        );
+        expect_test::expect![[r#"
+            [
+                "prompt_logprob_token_ids must be a non-empty integer array of shape [num_rows, num_ids].",
+                "requested prompt_logprob_token_ids of 21, which is greater than max allowed: 20",
+                "prompt_logprob_token_ids contain out-of-vocab token ids (-1 pads a row). Vocabulary size: 1000",
+                "prompt_logprob_token_ids contain out-of-vocab token ids (-1 pads a row). Vocabulary size: 1000",
+                "prompt_logprob_token_ids has 1 rows, but the prompt has 2 scored rows (prompt_len - 1 - prompt_logprob_start).",
+                "prompt_logprob_start requires prompt_logprob_token_ids.",
+            ]
+        "#]].assert_debug_eq(&[
+            rejects(Some(vec![vec![]]), None),
+            rejects(Some(vec![(0..21).collect(), vec![0]]), None),
+            rejects(Some(vec![vec![1000], vec![0]]), None),
+            rejects(Some(vec![vec![-2], vec![0]]), None),
+            rejects(Some(vec![vec![1]]), None),
+            rejects(None, Some(0)),
+        ]);
+    }
+
+    #[test]
     fn lower_sampling_params_rejects_out_of_vocab_stop_token_ids() {
         let error = lower_sampling_params_with_limits(
             SamplingParams {
@@ -1171,26 +1393,114 @@ mod tests {
     #[test]
     fn lower_sampling_params_rejects_out_of_vocab_bad_words() {
         let tokenizer = TestTokenizer::new().with_regular_token("blocked", 2000);
-        let error = lower_sampling_params(
+        for sampling_params in [
             SamplingParams {
                 bad_words: Some(vec!["blocked".to_string()]),
                 ..Default::default()
             },
-            SamplingHints::default(),
+            SamplingParams {
+                bad_words_token_ids: Some(vec![vec![1999, 2000]]),
+                ..Default::default()
+            },
+        ] {
+            let error = lower_sampling_params(
+                sampling_params,
+                SamplingHints::default(),
+                sample_sampling_limits(),
+                3,
+                &tokenizer,
+            )
+            .unwrap_err();
+
+            assert!(matches!(
+                error,
+                Error::TokenIds(TokenIdsError::OutOfVocab {
+                    parameter: "bad_words",
+                    token_ids,
+                    vocab_size: 2000,
+                }) if token_ids == vec![2000]
+            ));
+        }
+    }
+
+    #[test]
+    fn lower_sampling_params_preserves_raw_bad_words_alongside_strings() {
+        let tokenizer = TestTokenizer::new()
+            .with_regular_token("blocked", 300)
+            .with_regular_token(" blocked", 301);
+        for raw in [None, Some(vec![]), Some(vec![vec![7, 11]])] {
+            let params = lower_sampling_params(
+                SamplingParams {
+                    bad_words: Some(vec!["blocked".to_string()]),
+                    bad_words_token_ids: raw.clone(),
+                    ..Default::default()
+                },
+                SamplingHints::default(),
+                sample_sampling_limits(),
+                3,
+                &tokenizer,
+            )
+            .unwrap();
+            let expected = if raw.as_ref().is_some_and(|ids| !ids.is_empty()) {
+                vec![vec![7, 11], vec![300], vec![301]]
+            } else {
+                vec![vec![300], vec![301]]
+            };
+            assert_eq!(params.bad_words_token_ids, Some(expected));
+        }
+        let error = lower_sampling_params_with_limits(
+            SamplingParams {
+                bad_words_token_ids: Some(vec![vec![]]),
+                ..Default::default()
+            },
             sample_sampling_limits(),
-            3,
-            &tokenizer,
         )
         .unwrap_err();
-
         assert!(matches!(
             error,
-            Error::TokenIds(TokenIdsError::OutOfVocab {
-                parameter: "bad_words",
-                token_ids,
-                vocab_size: 2000,
-            }) if token_ids == vec![2000]
+            Error::TokenIds(TokenIdsError::EmptyBadWordSequence)
         ));
+    }
+
+    #[test]
+    fn lower_sampling_params_enforces_bad_words_limits() {
+        let tokenizer = TestTokenizer::new()
+            .with_regular_token("blocked", 300)
+            .with_regular_token(" blocked", 301);
+        let lower = |bad_words: Option<Vec<String>>, bad_words_token_ids: Vec<Vec<u32>>| {
+            lower_sampling_params(
+                SamplingParams {
+                    bad_words,
+                    bad_words_token_ids: Some(bad_words_token_ids),
+                    ..Default::default()
+                },
+                SamplingHints::default(),
+                sample_sampling_limits(),
+                3,
+                &tokenizer,
+            )
+        };
+
+        lower(None, vec![vec![7; 8]; 128]).unwrap();
+        for (bad_words, raw, expected) in [
+            (
+                None,
+                vec![vec![7]; 129],
+                "Too many bad words: 129. The max number is 128.",
+            ),
+            (
+                Some(vec!["blocked".to_string()]),
+                vec![vec![7]; 127],
+                "Too many bad words: 129. The max number is 128.",
+            ),
+            (
+                None,
+                vec![vec![7; 1025]],
+                "Too many total bad word tokens: 1025. The max is 1024.",
+            ),
+        ] {
+            assert_eq!(lower(bad_words, raw).unwrap_err().to_string(), expected);
+        }
     }
 
     #[test]
@@ -1237,6 +1547,7 @@ mod tests {
         expect_test::expect![[r#"
             EngineCoreSamplingParams {
                 temperature: 0.8,
+                watermarking: true,
                 top_p: 0.9,
                 top_k: 12,
                 seed: None,
@@ -1245,6 +1556,8 @@ mod tests {
                 thinking_token_budget: None,
                 logprobs: None,
                 prompt_logprobs: None,
+                prompt_logprob_token_ids: None,
+                prompt_logprob_start: None,
                 min_p: 0.1,
                 frequency_penalty: 0.0,
                 presence_penalty: 0.0,
@@ -1261,6 +1574,7 @@ mod tests {
                 skip_reading_prefix_cache: None,
                 extra_args: None,
                 routed_experts_prompt_start: 0,
+                stream_interval: None,
             }
         "#]]
         .assert_debug_eq(&params);
@@ -1288,6 +1602,55 @@ mod tests {
 
         assert!(!prepared.text_request.intermediate);
         assert_eq!(prepared.generate_request.request_id, "text-1");
+    }
+
+    #[test]
+    fn lower_text_request_carries_stream_interval_in_sampling_params() {
+        let mut request = sample_request();
+        request.sampling_params.stream_interval = NonZeroU32::new(4);
+
+        let prepared = lower_text_request(
+            request,
+            vec![1, 2, 3],
+            sample_sampling_hints(),
+            sample_sampling_limits(),
+            &stub_tokenizer(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.generate_request.sampling_params.stream_interval,
+            NonZeroU32::new(4)
+        );
+    }
+
+    #[test]
+    fn lower_text_request_passes_kv_hints_through() {
+        let hints = KvHintsEnvelope {
+            protocol_version: "0.1".to_string(),
+            message_id: "msg-1".to_string(),
+            actions: vec![KvHintAction {
+                action_id: "action-1".to_string(),
+                action_type: "example.action".to_string(),
+                action_version: "1.0".to_string(),
+                payload: Default::default(),
+            }],
+        };
+        let request = TextRequest {
+            kv_hints: Some(hints.clone()),
+            ..sample_request()
+        };
+
+        let prepared = lower_text_request(
+            request,
+            vec![1, 2, 3],
+            sample_sampling_hints(),
+            sample_sampling_limits(),
+            &stub_tokenizer(),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.generate_request.kv_hints, Some(hints));
     }
 
     #[test]

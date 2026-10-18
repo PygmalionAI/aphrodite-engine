@@ -27,13 +27,24 @@ cargo run -p aphrodite-chat --example external_engine_chat_qwen -- \
   --prompt 'What is the capital of France? Answer with one word.'
 ```
 
-The example now defaults to `Qwen/Qwen3-0.6B`. The current `aphrodite-chat`
-request model stays text-first and supports either plain string content or
-OpenAI-style text blocks, while the output side now emits structured assistant
-events and automatically separates reasoning blocks for supported models. Tool
-use and multimodal inputs are still out of scope. It uses the Rust
-`tokenizers` library for the tokenizer itself, plus standard Hugging Face
-config files to load the chat template and EOS metadata.
+The example defaults to `Qwen/Qwen3-0.6B` and exercises text-only chat through
+the Rust `tokenizers` library and standard Hugging Face model files. The chat
+crate also supports tools, image/video/audio preprocessing, and native
+DeepSeek V3.2/V4/V4.1, Harmony, Inkling, and Kimi K3 renderers; this example
+does not supply those inputs.
+
+Parser-built output grammars are initialized from the final prompt token IDs,
+including expanded multimodal placeholders. They compose supported answer
+constraints with tool-call and reasoning formats; `--tool-strict-level` sets
+the tool constraint floor. The `hf` response-template parser is opt-in.
+Completed chat events retain engine lifecycle timestamps and KV/encoder
+transfer parameters. Multimodal stage timing is exposed through
+`mm_timing_layer` and `mm_request_span`.
+
+Sonar wheels retain the `aphrodite._rust_tool_parser` Python extension alongside
+the Rust frontend. Its `Tool` accepts optional `strict` and `defer_loading`
+fields; deferred tools remain callable and are only hidden from initial
+template rendering.
 
 IMPORTANT: Restart `aphrodite` each time you run the smoke test. The current headless
 engine cannot safely handle frontend reconnects after the client shuts down.

@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-"""
-Integration tests for MultiprocExecutor at the executor level.
+"""Integration tests for MultiprocExecutor at the executor level.
 This test directly tests the executor without going through the LLM interface,
 focusing on executor initialization, RPC calls, and distributed execution.
 """
@@ -15,6 +14,7 @@ import pytest
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.engine.arg_utils import EngineArgs
+from aphrodite.platforms import current_platform
 from aphrodite.v1.core.sched.output import SchedulerOutput
 from aphrodite.v1.executor import multiproc_executor
 from aphrodite.v1.executor.multiproc_executor import MultiprocExecutor
@@ -368,11 +368,10 @@ def test_multiproc_executor_properties():
 
 @multi_gpu_test(num_gpus=4)
 def test_multiproc_executor_multi_node():
-    """
-    Test MultiprocExecutor with multi-node configuration.
+    """Test MultiprocExecutor with multi-node configuration.
     This simulates 2 nodes with TP=4:
-    - Node 0 (rank 0): Uses GPUs 0,1 (CUDA_VISIBLE_DEVICES=0,1) with TP=2
-    - Node 1 (rank 1): Uses GPUs 2,3 (CUDA_VISIBLE_DEVICES=2,3) with TP=2
+    - Node 0 (rank 0): Uses GPUs 0,1 (device_control_env_var=0,1) with TP=2
+    - Node 1 (rank 1): Uses GPUs 2,3 (device_control_env_var=2,3) with TP=2
     Total world_size = 4, nnodes = 2
     """
     # Python 3.14+ changed default multiprocessing start method to 'forkserver'
@@ -385,15 +384,20 @@ def test_multiproc_executor_multi_node():
     # symm_mem does not work for simulating multi instance in single node
     os.environ["APHRODITE_ALLREDUCE_USE_SYMM_MEM"] = "0"
 
+    # Use the platform-specific device control env var (e.g.
+    # CUDA_VISIBLE_DEVICES on CUDA, ZE_AFFINITY_MASK on XPU) so that each
+    # node only sees its own devices on different platform.
+    device_control_env_var = current_platform.device_control_env_var
+
     def run_node(node_rank: int, result_queue: multiprocessing.Queue, port: int):
         """Run a single node's executor."""
         executor = None
         try:
-            # Set CUDA_VISIBLE_DEVICES for this node
+            # Restrict visible devices for this node
             if node_rank == 0:
-                os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+                os.environ[device_control_env_var] = "0,1"
             else:
-                os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+                os.environ[device_control_env_var] = "2,3"
 
             # Create config for this node
             aphrodite_config = create_aphrodite_config(

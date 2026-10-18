@@ -15,7 +15,7 @@ from transformers import (
 )
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.distributed import divide, get_tensor_model_parallel_world_size
 from aphrodite.inputs import MultiModalDataDict, MultiModalInput
 from aphrodite.model_executor.layers.activation import get_act_fn
@@ -67,12 +67,11 @@ from .vision import (
 
 
 class CLIPImagePixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - bn: Batch size * number of images
-        - c: Number of channels (3)
-        - h: Height of each image
-        - w: Width of each image
+    """Dimensions:
+    - bn: Batch size * number of images
+    - c: Number of channels (3)
+    - h: Height of each image
+    - w: Width of each image
     """
 
     type: Literal["pixel_values"]
@@ -203,20 +202,16 @@ class CLIPDummyInputsBuilder(BaseDummyInputsBuilder[CLIPProcessingInfo]):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
-        num_images = mm_counts.get("image", 0)
-
         target_width, target_height = self.info.get_image_size_with_most_features()
-
-        image_overrides = mm_options.get("image")
 
         return {
             "image": self._get_dummy_images(
                 width=target_width,
                 height=target_height,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             )
         }
 
@@ -406,8 +401,7 @@ class CLIPAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
     ):
-        """Input shape: Batch x Time x Channel"""
-
+        """Input shape: Batch x Time x Channel."""
         qkv_states, _ = self.qkv_proj(hidden_states)
         query_states, key_states, value_states = qkv_states.chunk(3, dim=-1)
         out = self.attn(query_states, key_states, value_states)
@@ -495,12 +489,12 @@ class CLIPEncoderLayer(nn.Module):
 
 
 class CLIPEncoder(nn.Module):
-    """
-    Transformer encoder consisting of `config.num_hidden_layers` self
+    """Transformer encoder consisting of `config.num_hidden_layers` self
     attention layers. Each layer is a [`CLIPEncoderLayer`].
 
     Args:
         config: CLIPConfig
+
     """
 
     def __init__(

@@ -23,45 +23,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-import torch.nn as nn
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
 from aphrodite.model_executor.models.llama import (
-    LlamaDecoderLayer,
     LlamaForCausalLM,
-    LlamaModel,
 )
-
-
-class TeleFLMModel(LlamaModel):
-    def __init__(
-        self,
-        *,
-        aphrodite_config: AphroditeConfig,
-        prefix: str = "",
-        layer_type: type[nn.Module] = LlamaDecoderLayer,
-    ):
-        super().__init__(aphrodite_config=aphrodite_config, prefix=prefix, layer_type=layer_type)
-        """
-        This implementation is based on the µScaling paper presented at  
-        the ICLR 2025 Workshop:  
-        NanoLM: An Affordable LLM Study Benchmark \
-        via Accurate Loss Prediction across Scales
-        by Yiqun Yao et al.  
-        Available at: https://openreview.net/forum?id=IwaPYg1SCA  
-        arXiv preprint: https://arxiv.org/abs/2304.06875
-        """
-        self.use_mup = self.config.use_mup
-        if self.use_mup:
-            self.input_mult = self.config.input_mult
-
-    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        embedding = self.embed_tokens(input_ids)
-        if self.use_mup:
-            embedding = embedding * self.input_mult
-        return embedding
 
 
 class TeleFLMForCausalLM(LlamaForCausalLM):

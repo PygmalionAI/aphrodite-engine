@@ -2,10 +2,15 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import pytest
+from tokenizers import Tokenizer, models, pre_tokenizers
+from transformers import TokenizersBackend
 
 from aphrodite.entrypoints.pooling.scoring.typing import ScoreInput
-from aphrodite.entrypoints.pooling.scoring.utils import validate_score_input
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.entrypoints.pooling.scoring.utils import (
+    truncate_text_to_tokens,
+    validate_score_input,
+)
+from aphrodite.exceptions import AphroditeValidationError
 
 
 @pytest.mark.parametrize(
@@ -52,7 +57,7 @@ def test_validate_score_input_rejects_invalid_inputs(
     architecture: str,
     message: str,
 ):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         validate_score_input(
             data_1,
             data_2,
@@ -63,3 +68,15 @@ def test_validate_score_input_rejects_invalid_inputs(
     assert str(exc_info.value) == message
     assert exc_info.value.parameter is None
     assert exc_info.value.value is None
+
+
+def test_truncate_text_to_tokens_handles_shared_character_offsets():
+    vocab = {token: i for i, token in enumerate(sorted(pre_tokenizers.ByteLevel.alphabet()))}
+    backend = Tokenizer(models.BPE(vocab=vocab, merges=[]))
+    backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tokenizer = TokenizersBackend(tokenizer_object=backend)
+
+    truncated = truncate_text_to_tokens("aéx", tokenizer, max_tokens=2)
+
+    assert truncated == "a"
+    assert len(tokenizer(truncated, add_special_tokens=False)["input_ids"]) == 1

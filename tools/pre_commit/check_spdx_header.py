@@ -16,6 +16,8 @@ class HeaderStyle:
 
 
 class SPDXStatus(Enum):
+    """SPDX header status enumeration."""
+
     EMPTY = "empty"
     COMPLETE = "complete"
     MISSING_LICENSE = "missing_license"
@@ -56,6 +58,7 @@ def header_insertion_index(style: HeaderStyle, lines: list[str]) -> int:
 
 
 def check_spdx_header_status(file_path: str) -> SPDXStatus:
+    """Check SPDX header status of the file."""
     license_line, copyright_line = spdx_header(file_style(file_path))
     with open(file_path, encoding="utf-8") as file:
         lines = file.readlines()
@@ -81,6 +84,7 @@ def check_spdx_header_status(file_path: str) -> SPDXStatus:
 
 
 def add_header(file_path: str, status: SPDXStatus) -> None:
+    """Add or supplement SPDX header based on status."""
     style = file_style(file_path)
     license_line, copyright_line = spdx_header(style)
     full_spdx_header = f"{license_line}\n{copyright_line}\n"
@@ -116,6 +120,7 @@ def add_header(file_path: str, status: SPDXStatus) -> None:
 
 
 def main() -> int:
+    """Check and repair SPDX headers for supported source files."""
     files_to_fix: list[tuple[str, SPDXStatus]] = []
     for file_path in sys.argv[1:]:
         status = check_spdx_header_status(file_path)

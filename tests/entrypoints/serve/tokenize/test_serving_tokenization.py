@@ -19,9 +19,10 @@ from aphrodite.entrypoints.serve.tokenize.api_router import attach_router
 from aphrodite.entrypoints.serve.tokenize.protocol import (
     TokenizeChatRequest,
     TokenizeCompletionRequest,
+    TokenizeResponse,
 )
 from aphrodite.entrypoints.serve.tokenize.serving import ServingTokenization
-from aphrodite.exceptions import APHRODITENotFoundError, APHRODITEValidationError
+from aphrodite.exceptions import AphroditeNotFoundError, AphroditeValidationError
 from aphrodite.renderers.online_renderer import OnlineRenderer
 from aphrodite.v1.engine.async_llm import AsyncLLM
 
@@ -56,9 +57,10 @@ class MockModelConfig:
     encoder_config = None
     generation_config: str = "auto"
     media_io_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    skip_tokenizer_init = False
+    skip_tokenizer_init: bool = False
     is_encoder_decoder: bool = False
     is_multimodal_model: bool = False
+    supports_multimodal_inputs: bool = False
     renderer_num_workers: int = 1
 
     def get_diff_sampling_param(self):
@@ -94,7 +96,7 @@ async def test_tokenize_chat_skips_mm_cache_for_renderer_only_path():
     mock_engine.renderer = MagicMock()
 
     serving = _build_serving_tokenization(mock_engine)
-    serving.online_renderer.preprocess_chat = AsyncMock(
+    serving.online_renderer.preprocess_chat = AsyncMock(  # type: ignore[method-assign]
         return_value=(
             [{"role": "user", "content": "Test"}],
             [{"prompt_token_ids": [1, 2, 3]}],
@@ -108,7 +110,7 @@ async def test_tokenize_chat_skips_mm_cache_for_renderer_only_path():
 
     response = await serving.create_tokenize(request, MagicMock(headers={}))
 
-    assert response.tokens == [1, 2, 3]
+    assert isinstance(response, TokenizeResponse) and response.tokens == [1, 2, 3]
     assert serving.online_renderer.preprocess_chat.call_args.kwargs["skip_mm_cache"] is True
 
 
@@ -121,7 +123,9 @@ async def test_tokenize_completion_skips_mm_cache_for_renderer_only_path():
     mock_engine.renderer = MagicMock()
 
     serving = _build_serving_tokenization(mock_engine)
-    serving.online_renderer.preprocess_completion = AsyncMock(return_value=[{"prompt_token_ids": [1, 2, 3]}])
+    serving.online_renderer.preprocess_completion = AsyncMock(  # type: ignore[method-assign]
+        return_value=[{"prompt_token_ids": [1, 2, 3]}]
+    )
 
     request = TokenizeCompletionRequest(
         model=MODEL_NAME,
@@ -130,7 +134,7 @@ async def test_tokenize_completion_skips_mm_cache_for_renderer_only_path():
 
     response = await serving.create_tokenize(request, MagicMock(headers={}))
 
-    assert response.tokens == [1, 2, 3]
+    assert isinstance(response, TokenizeResponse) and response.tokens == [1, 2, 3]
     assert serving.online_renderer.preprocess_completion.call_args.kwargs["skip_mm_cache"] is True
 
 
@@ -166,7 +170,7 @@ class TestDetokenizeClientErrorResponses:
 
     def test_aphrodite_validation_error_returns_bad_request(self):
         handler = MagicMock(spec=ServingTokenization)
-        handler.create_detokenize.side_effect = APHRODITEValidationError("invalid token ids", parameter="tokens")
+        handler.create_detokenize.side_effect = AphroditeValidationError("invalid token ids", parameter="tokens")
 
         response = self._post(handler)
 
@@ -177,7 +181,7 @@ class TestDetokenizeClientErrorResponses:
 
     def test_aphrodite_not_found_error_returns_not_found(self):
         handler = MagicMock(spec=ServingTokenization)
-        handler.create_detokenize.side_effect = APHRODITENotFoundError("LoRA adapter nonexistent-lora not found")
+        handler.create_detokenize.side_effect = AphroditeNotFoundError("LoRA adapter nonexistent-lora not found")
 
         response = self._post(handler)
 
@@ -225,7 +229,7 @@ class TestDetokenizeClientErrorResponses:
             ("/detokenize", "create_detokenize"),
         ):
             handler = MagicMock(spec=ServingTokenization)
-            getattr(handler, method).side_effect = APHRODITEValidationError("invalid input", parameter="model")
+            getattr(handler, method).side_effect = AphroditeValidationError("invalid input", parameter="model")
             statuses[path] = self._post(handler, path=path).status_code
 
         assert statuses["/tokenize"] == HTTPStatus.BAD_REQUEST

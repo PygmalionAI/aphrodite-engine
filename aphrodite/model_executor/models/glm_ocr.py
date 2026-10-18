@@ -48,6 +48,7 @@ from aphrodite.model_executor.layers.attention.mm_encoder_attention import (
     MMEncoderAttention,
 )
 from aphrodite.model_executor.layers.conv import Conv2dLayer
+from aphrodite.model_executor.layers.fusion.mm_input_norm import build_mm_input_norm
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
     QKVParallelLinear,
@@ -246,9 +247,17 @@ class GlmOcrVisionTransformer(Glm4vVisionTransformer):
         vision_config: "GlmOcrVisionConfig",
         norm_eps: float = 1e-5,
         quant_config: QuantizationConfig | None = None,
+        input_norm: nn.Module | None = None,
         prefix: str = "",
     ) -> None:
-        super().__init__(text_config, vision_config, norm_eps, quant_config, prefix)
+        super().__init__(
+            text_config,
+            vision_config,
+            norm_eps,
+            quant_config,
+            input_norm,
+            prefix,
+        )
 
         del self.post_conv_layernorm
         del self.embeddings
@@ -324,7 +333,7 @@ class GlmOcrVisionTransformer(Glm4vVisionTransformer):
             grid_thw = torch.tensor(grid_thw, dtype=torch.int32)
 
         # patchify
-        x = x.to(device=self.device, dtype=self.dtype)
+        x = self.input_norm(x.to(device=self.device), self.dtype)
         x = self.patch_embed(x)
 
         # compute position embedding
@@ -381,5 +390,6 @@ class GlmOcrForConditionalGeneration(Glm4vForConditionalGeneration):
                 config.vision_config,
                 norm_eps=getattr(config, "rms_norm_eps", 1e-5),
                 quant_config=quant_config,
+                input_norm=build_mm_input_norm(self.model_config),
                 prefix=maybe_prefix(prefix, "visual"),
             )

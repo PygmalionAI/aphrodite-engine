@@ -19,6 +19,7 @@ def _topk_log_softmax_kernel(
     logits_ptr,
     logits_stride,
     topk_ids_ptr,
+    topk_ids_stride,
     topk,
     vocab_size,
     BLOCK_SIZE: tl.constexpr,
@@ -48,7 +49,7 @@ def _topk_log_softmax_kernel(
     for j in range(0, topk, TOPK_BLOCK_SIZE):
         k_offset = j + tl.arange(0, TOPK_BLOCK_SIZE)
         k_mask = k_offset < topk
-        topk_ids = tl.load(topk_ids_ptr + req_idx * topk + k_offset, mask=k_mask, other=0)
+        topk_ids = tl.load(topk_ids_ptr + req_idx * topk_ids_stride + k_offset, mask=k_mask, other=0)
         logits = tl.load(row_ptr + topk_ids, mask=k_mask)
         logits = logits.to(tl.float32)
         o = logits - max_val - lse
@@ -94,6 +95,7 @@ def compute_token_logprobs(logits: torch.Tensor, token_ids: torch.Tensor) -> tor
         logits,
         logits.stride(0),
         token_ids,
+        token_ids.stride(0),
         num_logprobs,
         vocab_size,
         BLOCK_SIZE=1024,  # type: ignore

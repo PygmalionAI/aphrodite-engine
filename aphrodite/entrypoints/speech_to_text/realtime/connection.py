@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncGenerator
 from http import HTTPStatus
@@ -15,7 +16,7 @@ from starlette.websockets import WebSocketDisconnect
 from aphrodite import envs
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse, UsageInfo
 from aphrodite.entrypoints.serve.exception_handling.utils import sanitize_message
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 
 from .protocol import (
@@ -48,6 +49,7 @@ class RealtimeConnection:
         self.serving = serving
         self.audio_queue: asyncio.Queue[np.ndarray | None] = asyncio.Queue()
         self.generation_task: asyncio.Task | None = None
+        self.request_id: str | None = None
 
         self._is_connected = False
         self._is_model_validated = False
@@ -121,13 +123,13 @@ class RealtimeConnection:
                 audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
                 if len(audio_array) / 1024**2 > self._max_audio_filesize_mb:
-                    raise APHRODITEValidationError(
+                    raise AphroditeValidationError(
                         "Maximum file size exceeded",
                         parameter="audio_filesize_mb",
                         value=len(audio_array) / 1024**2,
                     )
                 if len(audio_array) == 0:
-                    raise APHRODITEValidationError("Can't process empty audio.")
+                    raise AphroditeValidationError("Can't process empty audio.")
 
                 # Put audio chunk in queue
                 self.audio_queue.put_nowait(audio_array)
@@ -194,6 +196,7 @@ class RealtimeConnection:
         6. Cleans up the audio queue
         """
         request_id = f"rt-{self.connection_id}-{uuid4()}"
+        self.request_id = request_id
         full_text = ""
 
         prompt_token_ids_len: int = 0
@@ -253,7 +256,9 @@ class RealtimeConnection:
 
         except Exception as e:
             logger.exception("Error in generation: %s", e)
-            await self.send_error(sanitize_message(str(e)), "processing_error")
+            # The socket may already be closed; nothing more we can do.
+            with contextlib.suppress(Exception):
+                await self.send_error(sanitize_message(str(e)), "processing_error")
 
     async def send(self, event: SessionCreated | TranscriptionDelta | TranscriptionDone):
         """Send event to client."""
@@ -270,8 +275,28 @@ class RealtimeConnection:
         # Signal audio stream to stop
         self.audio_queue.put_nowait(None)
 
-        # Cancel generation task if running
+        # Abort the engine request. Cancelling the asyncio task alone does NOT
+        # abort the underlying engine request: a request parked in the
+        # VAD-waiting state keeps occupying a slot and generating into a now
+        # dead websocket (an orphaned request that never frees and starves
+        # other streams). Aborting also unblocks the generation task, which is
+        # otherwise stuck awaiting the next engine output.
+        if self.request_id is not None:
+            try:
+                await self.serving.engine_client.abort(self.request_id)
+            except Exception:
+                logger.exception("Failed to abort request %s", self.request_id)
+            self.request_id = None
+
+        # Cancel the generation task if still running, and await it so the
+        # cancellation (and any generator cleanup) actually completes.
         if self.generation_task and not self.generation_task.done():
             self.generation_task.cancel()
+            try:
+                await self.generation_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error awaiting cancelled generation task")
 
         logger.debug("Connection cleanup complete: %s", self.connection_id)

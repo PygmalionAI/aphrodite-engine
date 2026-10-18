@@ -13,7 +13,7 @@ from typing import Any
 
 import torch
 from torch import nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.compilation.decorators import support_torch_compile
 from aphrodite.config import AphroditeConfig, CacheConfig
@@ -161,7 +161,7 @@ class OrionAttention(nn.Module):
 class OrionDecoderLayer(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         cache_config: CacheConfig | None = None,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",

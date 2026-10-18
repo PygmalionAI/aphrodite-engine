@@ -2,24 +2,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import threading
 from collections import defaultdict
-from collections.abc import Mapping
 from dataclasses import dataclass
-from multiprocessing.synchronize import Lock as LockType
-from typing import TYPE_CHECKING, Generic, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar, cast
 
-from aphrodite.inputs import MultiModalInput
 from aphrodite.logger import init_logger
 from aphrodite.tokenizers import TokenizerLike, cached_tokenizer_from_config
 
-from .cache import (
-    BaseMultiModalProcessorCache,
-    BaseMultiModalReceiverCache,
-    MultiModalProcessorOnlyCache,
-    MultiModalProcessorSenderCache,
-    MultiModalReceiverCache,
-    ShmObjectStoreReceiverCache,
-    ShmObjectStoreSenderCache,
-)
 from .processing import (
     BaseDummyInputsBuilder,
     BaseMultiModalProcessor,
@@ -29,12 +17,7 @@ from .processing import (
 )
 
 if TYPE_CHECKING:
-    from aphrodite.config import (
-        AphroditeConfig,
-        ModelConfig,
-        ObservabilityConfig,
-        SchedulerConfig,
-    )
+    from aphrodite.config import ModelConfig, ObservabilityConfig
     from aphrodite.model_executor.models.interfaces import SupportsMultiModal
 
 logger = init_logger(__name__)
@@ -45,8 +28,7 @@ _I_co = TypeVar("_I_co", bound=BaseProcessingInfo, covariant=True)
 
 
 class ProcessingInfoFactory(Protocol[_I_co]):
-    """
-    Constructs a
+    """Constructs a
     [`BaseMultiModalProcessor`][aphrodite.multimodal.processing.BaseMultiModalProcessor]
     instance from the context.
     """
@@ -58,8 +40,7 @@ class ProcessingInfoFactory(Protocol[_I_co]):
 
 
 class DummyInputsBuilderFactory(Protocol[_I]):  # type: ignore[misc]
-    """
-    Constructs a
+    """Constructs a
     [`BaseDummyInputsBuilder`][aphrodite.multimodal.processing.BaseDummyInputsBuilder]
     instance from the context.
     """
@@ -68,8 +49,7 @@ class DummyInputsBuilderFactory(Protocol[_I]):  # type: ignore[misc]
 
 
 class MultiModalProcessorFactory(Protocol[_I]):  # type: ignore[misc]
-    """
-    Constructs a
+    """Constructs a
     [`BaseMultiModalProcessor`][aphrodite.multimodal.processing.BaseMultiModalProcessor]
     instance from the context.
     """
@@ -78,8 +58,6 @@ class MultiModalProcessorFactory(Protocol[_I]):  # type: ignore[misc]
         self,
         info: _I,
         dummy_inputs: BaseDummyInputsBuilder[_I],
-        *,
-        cache: BaseMultiModalProcessorCache | None = None,
     ) -> BaseMultiModalProcessor[_I]: ...
 
 
@@ -92,60 +70,14 @@ class _ProcessorFactories(Generic[_I]):
     def build_processor(
         self,
         ctx: InputProcessingContext,
-        *,
-        cache: BaseMultiModalProcessorCache | None = None,
     ):
         info = self.info(ctx)
         dummy_inputs_builder = self.dummy_inputs(info)
-        return self.processor(info, dummy_inputs_builder, cache=cache)
+        return self.processor(info, dummy_inputs_builder)
 
 
 class MultiModalRegistry:
-    """
-    A registry that dispatches data processing according to the model.
-    """
-
-    def supports_multimodal_inputs(self, model_config: "ModelConfig") -> bool:
-        """
-        Checks if the model supports multimodal inputs.
-        Returns True if the model is multimodal with any non-zero supported
-        modalities, otherwise returns False, effectively running in
-        text-only mode.
-        """
-        if not model_config.is_multimodal_model:
-            return False
-
-        mm_config = model_config.get_multimodal_config()
-        try:
-            info = self._create_processing_info(model_config, tokenizer=None)
-        except ValueError:
-            # Speculative drafters for multimodal targets (e.g. Qwen3_5MTP,
-            # Exaone4_5_MTP, MiMoV2OmniMTP) declare `SupportsMultiModal` so
-            # that they can consume the embeddings merged by the target model,
-            # but they never run a multi-modal processor of their own. Running
-            # in text-only mode is the expected outcome for them, not a
-            # misconfiguration worth warning about.
-            if model_config.runner_type != "draft":
-                logger.warning_once(
-                    "Model %s is treated as multimodal but has no registered "
-                    "multimodal processor; running in text-only mode.",
-                    model_config.model,
-                )
-            return False
-
-        # Check if all supported modalities have limit == 0
-        if all(mm_config.get_limit_per_prompt(modality) == 0 for modality in info.supported_mm_limits):
-            # If enable_mm_embeds is True, we still need MM infrastructure
-            # to process pre-computed embeddings even though encoder won't run
-            if mm_config.enable_mm_embeds:
-                return True
-
-            logger.info_once(
-                "All limits of multimodal modalities supported by the model are set to 0, running in text-only mode."
-            )
-            return False
-
-        return True
+    """A registry that dispatches data processing according to the model."""
 
     def register_processor(
         self,
@@ -154,8 +86,7 @@ class MultiModalRegistry:
         info: ProcessingInfoFactory[_I],
         dummy_inputs: DummyInputsBuilderFactory[_I],
     ):
-        """
-        Register a multi-modal processor to a model class. The processor
+        """Register a multi-modal processor to a model class. The processor
         is constructed lazily, hence a factory method should be passed.
 
         When the model receives multi-modal data, the provided function is
@@ -218,11 +149,8 @@ class MultiModalRegistry:
         model_config: "ModelConfig",
         *,
         tokenizer: TokenizerLike | None = None,
-        cache: BaseMultiModalProcessorCache | None = None,
     ) -> BaseMultiModalProcessor[BaseProcessingInfo]:
-        """
-        Create a multi-modal processor for a specific model and tokenizer.
-        """
+        """Create a multi-modal processor for a specific model and tokenizer."""
         if not model_config.is_multimodal_model:
             model_name = model_config.served_model_name or model_config.model
             raise ValueError(f"{model_name} is not a multimodal model")
@@ -232,126 +160,7 @@ class MultiModalRegistry:
 
         ctx = self._create_processing_ctx(model_config, tokenizer)
 
-        return factories.build_processor(ctx, cache=cache)
-
-    def get_dummy_mm_inputs(
-        self,
-        model_config: "ModelConfig",
-        mm_counts: Mapping[str, int],
-        *,
-        cache: BaseMultiModalProcessorCache | None = None,
-        processor: BaseMultiModalProcessor | None = None,
-        scheduler_config: "SchedulerConfig | None" = None,
-    ) -> MultiModalInput:
-        """
-        Create dummy data for profiling the memory usage of a model.
-
-        The model is identified by `model_config`.
-        """
-        seq_len = model_config.max_model_len
-        if scheduler_config is not None and scheduler_config.enable_chunked_prefill:
-            seq_len = min(seq_len, scheduler_config.max_num_batched_tokens)
-
-        if processor is None:
-            processor = self.create_processor(model_config, cache=cache)
-
-        mm_config = model_config.get_multimodal_config()
-        processor_inputs = processor.dummy_inputs.get_dummy_processor_inputs(
-            seq_len=seq_len,
-            mm_counts=mm_counts,
-            mm_options=mm_config.limit_per_prompt,
-        )
-        mm_inputs = processor.apply(
-            processor_inputs,
-            timing_ctx=TimingContext(enabled=False),
-        )
-
-        prompt_token_ids = mm_inputs["prompt_token_ids"]
-        total_len = len(prompt_token_ids)
-        if total_len < seq_len:
-            prompt_token_ids.extend([0] * (seq_len - total_len))
-
-        return mm_inputs
-
-    def _get_cache_type(
-        self,
-        aphrodite_config: "AphroditeConfig",
-    ) -> Literal[None, "processor_only", "lru", "shm"]:
-        model_config = aphrodite_config.model_config
-        if not self.supports_multimodal_inputs(model_config):
-            return None
-
-        # Check if the cache is disabled.
-        mm_config = model_config.get_multimodal_config()
-        if mm_config.mm_processor_cache_gb <= 0:
-            return None
-
-        # Check if IPC caching is supported.
-        parallel_config = aphrodite_config.parallel_config
-        is_ipc_supported = parallel_config._api_process_count == 1 and (
-            parallel_config.data_parallel_size == 1 or parallel_config.data_parallel_external_lb
-        )
-
-        if not is_ipc_supported:
-            return "processor_only"
-
-        mm_config = model_config.get_multimodal_config()
-        return mm_config.mm_processor_cache_type
-
-    def processor_cache_from_config(
-        self,
-        aphrodite_config: "AphroditeConfig",
-    ) -> BaseMultiModalProcessorCache | None:
-        """Return a `BaseMultiModalProcessorCache`, if enabled."""
-        cache_type = self._get_cache_type(aphrodite_config)
-        if cache_type is None:
-            return None
-        elif cache_type == "processor_only":
-            return MultiModalProcessorOnlyCache(aphrodite_config.model_config)
-        elif cache_type == "lru":
-            return MultiModalProcessorSenderCache(aphrodite_config.model_config)
-        elif cache_type == "shm":
-            return ShmObjectStoreSenderCache(aphrodite_config)
-        else:
-            raise ValueError(f"Unknown cache type: {cache_type!r}")
-
-    def processor_only_cache_from_config(
-        self,
-        aphrodite_config: "AphroditeConfig",
-    ) -> MultiModalProcessorOnlyCache | None:
-        """Return a `MultiModalProcessorOnlyCache`, if enabled."""
-        cache_type = self._get_cache_type(aphrodite_config)
-        if cache_type is None:
-            return None
-
-        return MultiModalProcessorOnlyCache(aphrodite_config.model_config)
-
-    def engine_receiver_cache_from_config(
-        self,
-        aphrodite_config: "AphroditeConfig",
-    ) -> BaseMultiModalReceiverCache | None:
-        """Return a `BaseMultiModalReceiverCache` for the engine process."""
-        cache_type = self._get_cache_type(aphrodite_config)
-        if cache_type in (None, "processor_only", "shm"):
-            return None
-        elif cache_type == "lru":
-            return MultiModalReceiverCache(aphrodite_config.model_config)
-        else:
-            raise ValueError(f"Unknown cache type: {cache_type!r}")
-
-    def worker_receiver_cache_from_config(
-        self,
-        aphrodite_config: "AphroditeConfig",
-        shared_worker_lock: LockType,
-    ) -> BaseMultiModalReceiverCache | None:
-        """Return a `BaseMultiModalReceiverCache` for the worker process."""
-        cache_type = self._get_cache_type(aphrodite_config)
-        if cache_type in (None, "processor_only", "lru"):
-            return None
-        elif cache_type == "shm":
-            return ShmObjectStoreReceiverCache(aphrodite_config, shared_worker_lock)
-        else:
-            raise ValueError(f"Unknown cache type: {cache_type!r}")
+        return factories.build_processor(ctx)
 
 
 class MultiModalTimingRegistry:

@@ -16,6 +16,7 @@ from aphrodite.lora.request import LoRARequest
 from aphrodite.multimodal.inputs import MultiModalFeatureSpec
 from aphrodite.pooling_params import PoolingParams
 from aphrodite.sampling_params import SamplingParams
+from aphrodite.v1.kv_hints import KvHintsEnvelope
 from aphrodite.v1.metrics.stats import (
     PrefillStats,
     RequestSpecDecodeMetrics,
@@ -45,8 +46,7 @@ class EEPNotificationType(enum.Enum):
 
 
 class FinishReason(enum.IntEnum):
-    """
-    Reason a request finished - stop, length, abort, error, or repetition.
+    """Reason a request finished - stop, length, abort, error, or repetition.
 
     Int rather than Str for more compact serialization.
 
@@ -102,6 +102,11 @@ class EngineCoreReadyResponse:
     weight_transfer_backend: str | None = None
     enable_sleep_mode: bool = False
     supports_draft_weight_updates: bool = False
+    # Full-attention block size in tokens after initialization, or unavailable.
+    effective_attention_block_size: int | None = None
+    coord_store_port: int = 0
+    coordinator_input_address: str | None = None
+    coordinator_output_address: str | None = None
 
 
 class EngineCoreRequest(
@@ -156,6 +161,7 @@ class EngineCoreRequest(
     abort_immediately: bool = False
 
     session_id: str | None = None
+    kv_hints: KvHintsEnvelope | None = None
 
     @property
     def params(self) -> SamplingParams | PoolingParams:
@@ -231,6 +237,9 @@ class EngineCoreOutput(
     # Appended last so `array_like` positional serialization stays compatible.
     spec_decode_metrics: RequestSpecDecodeMetrics | None = None
 
+    # [num_scored_rows, num_token_ids]; appended last for array_like compatibility.
+    prompt_token_id_logprobs: torch.Tensor | None = None
+
     @property
     def finished(self) -> bool:
         return self.finish_reason is not None
@@ -274,14 +283,16 @@ class EngineCoreOutputs(
     # "old" wave, so the next wave needs to be started in other engines.
     start_wave: int | None = None
 
+    # Weight version used for this step.
+    weight_version: str | None = None
+
     def __post_init__(self):
         if self.timestamp == 0.0:
             self.timestamp = time.monotonic()
 
 
 class EngineCoreRequestType(enum.Enum):
-    """
-    Request types defined as hex byte strings, so it can be sent over sockets
+    """Request types defined as hex byte strings, so it can be sent over sockets
     without separate encoding step.
     """
 
@@ -306,9 +317,7 @@ class ReconfigureDistributedRequest(msgspec.Struct):
 
 
 class ReconfigureRankType(enum.IntEnum):
-    """
-    Rank type for reconfiguring distributed request.
-    """
+    """Rank type for reconfiguring distributed request."""
 
     KEEP_CURRENT_RANK = -1
     SHUTDOWN_CURRENT_RANK = -2

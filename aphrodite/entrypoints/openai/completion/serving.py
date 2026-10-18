@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import itertools
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from collections.abc import Sequence as GenericSequence
@@ -19,6 +20,7 @@ from aphrodite.entrypoints.generate.base.serving import (
     build_per_request_timing_metrics,
     build_spec_decoding_metrics,
     clamp_prompt_logprobs,
+    completion_top_logprobs_limit,
     format_token_id_placeholder,
 )
 from aphrodite.entrypoints.openai.completion.protocol import (
@@ -37,7 +39,7 @@ from aphrodite.entrypoints.serve.engine.protocol import (
 )
 from aphrodite.entrypoints.serve.utils.api_utils import get_max_tokens, should_include_usage
 from aphrodite.entrypoints.serve.utils.request_logger import RequestLogger
-from aphrodite.exceptions import APHRODITEValidationError, GenerationError
+from aphrodite.exceptions import AphroditeValidationError, GenerationError
 from aphrodite.inputs import EngineInput
 from aphrodite.logger import init_logger
 from aphrodite.logprobs import Logprob
@@ -89,14 +91,14 @@ class OpenAIServingCompletion(GenerateBaseServing):
         self,
         request: CompletionRequest,
     ) -> list[EngineInput] | ErrorResponse:
-        """
-        Validate the model and preprocess a completion request.
+        """Validate the model and preprocess a completion request.
 
         Delegates preprocessing logic to OnlineRenderer, adding the
         engine-aware checks (LoRA model validation, engine health).
 
         Returns:
             A list of engine_inputs on success, or an ErrorResponse on failure.
+
         """
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
@@ -116,9 +118,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
         See https://platform.openai.com/docs/api-reference/completions/create
         for the API specification. This API mimics the OpenAI Completion API.
 
-        NOTE: Currently we do not support the following feature:
-            - suffix (the language models we currently support do not support
-            suffix)
+        NOTE: suffix is only supported by models that implement FIM rendering.
         """
         return await self._with_kv_transfer_rejection_cleanup(
             self._create_completion(request, raw_request), request, raw_request
@@ -283,7 +283,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
         request_metadata: RequestResponseMetadata,
     ) -> AsyncGenerator[str, None]:
         num_choices = 1 if request.n is None else request.n
-        previous_text_lens = [0] * num_choices * num_prompts
+        next_text_offsets = [0] * num_choices * num_prompts
         previous_num_tokens = [0] * num_choices * num_prompts
         has_echoed = [False] * num_choices * num_prompts
         num_prompt_tokens = [0] * num_prompts
@@ -318,6 +318,8 @@ class OpenAIServingCompletion(GenerateBaseServing):
 
                 for output in res.outputs:
                     i = output.index + prompt_idx * num_choices
+                    finish_reason = output.finish_reason
+                    self._raise_if_error(finish_reason, request_id)
 
                     # Useful when request.return_token_ids is True
                     # Returning prompt token IDs shares the same logic
@@ -360,7 +362,12 @@ class OpenAIServingCompletion(GenerateBaseServing):
                             prompt_token_ids_to_return = prompt_token_ids
                             has_echoed[i] = True
 
-                        if not delta_text and not delta_token_ids and not previous_num_tokens[i]:
+                        if (
+                            not delta_text
+                            and not delta_token_ids
+                            and not previous_num_tokens[i]
+                            and finish_reason is None
+                        ):
                             # Chunked prefill case, don't return empty chunks
                             continue
 
@@ -372,18 +379,18 @@ class OpenAIServingCompletion(GenerateBaseServing):
                             num_output_top_logprobs=request.logprobs,
                             tokenizer=tokenizer,
                             logprob_token_ids=request.logprob_token_ids,
-                            initial_text_offset=previous_text_lens[i],
+                            initial_text_offset=next_text_offsets[i],
                             return_as_token_id=request.return_tokens_as_token_ids,
                         )
+                        # Advance by the tokens just reported, not by delta_text:
+                        # text held back for stop strings lags the tokens.
+                        if logprobs.tokens:
+                            next_text_offsets[i] = logprobs.text_offset[-1] + len(logprobs.tokens[-1])
                     else:
                         logprobs = None
 
-                    previous_text_lens[i] += len(delta_text)
                     previous_num_tokens[i] += len(output.token_ids)
-                    finish_reason = output.finish_reason
                     stop_reason = output.stop_reason
-
-                    self._raise_if_error(finish_reason, request_id)
 
                     chunk = CompletionStreamResponse(
                         id=request_id,
@@ -399,6 +406,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
                                 stop_reason=stop_reason,
                                 prompt_token_ids=prompt_token_ids_to_return,
                                 token_ids=(as_list(output.token_ids) if request.return_token_ids else None),
+                                weight_versions=(output.weight_versions if request.return_weight_versions else None),
                             )
                         ],
                     )
@@ -554,6 +562,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
                     prompt_token_ids=(prompt_token_ids if request.return_token_ids else None),
                     token_ids=(as_list(output.token_ids) if request.return_token_ids else None),
                     routed_experts=routed_experts_b64,
+                    weight_versions=(output.weight_versions if request.return_weight_versions else None),
                 )
                 choices.append(choice_data)
 
@@ -630,7 +639,7 @@ class OpenAIServingCompletion(GenerateBaseServing):
                     token = format_token_id_placeholder(token_id)
                 else:
                     if tokenizer is None:
-                        raise APHRODITEValidationError(
+                        raise AphroditeValidationError(
                             "Unable to get tokenizer because `skip_tokenizer_init=True`",
                             parameter="skip_tokenizer_init",
                             value=True,
@@ -669,8 +678,10 @@ class OpenAIServingCompletion(GenerateBaseServing):
                             tokenizer,
                             return_as_token_id=should_return_as_token_id,
                         ): max(top_lp[1].logprob, -9999.0)
-                        for i, top_lp in enumerate(step_top_logprobs.items())
-                        if logprob_token_ids or num_output_top_logprobs >= i
+                        for top_lp in itertools.islice(
+                            step_top_logprobs.items(),
+                            completion_top_logprobs_limit(num_output_top_logprobs, bool(logprob_token_ids)),
+                        )
                     }
                 )
 

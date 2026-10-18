@@ -19,6 +19,8 @@
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+import torch
+
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
 from aphrodite.model_executor.layers.vocab_parallel_embedding import (
     ParallelLMHead,
@@ -27,13 +29,13 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
 from aphrodite.model_executor.models.interfaces_base import AphroditeModelForTextGeneration
 from aphrodite.model_executor.models.utils import PPMissingLayer, maybe_prefix
 
-if TYPE_CHECKING:
-    import torch
+from .base import Base
 
+if TYPE_CHECKING:
     from aphrodite.config import AphroditeConfig
 
 
-class CausalMixin(AphroditeModelForTextGeneration):
+class CausalMixin(AphroditeModelForTextGeneration, Base):
     def __init__(self, *, aphrodite_config: "AphroditeConfig", prefix: str = ""):
         # Skip AphroditeModelForTextGeneration.__init__ and call the next class in MRO
         super(AphroditeModelForTextGeneration, self).__init__(aphrodite_config=aphrodite_config, prefix=prefix)
@@ -63,13 +65,16 @@ class CausalMixin(AphroditeModelForTextGeneration):
 
     def load_weights(self, weights: Iterable[tuple[str, "torch.Tensor"]]) -> set[str]:
         """A thin wrapper around `Base.load_weights` to handle the lm_head bias."""
-
         lm_head_bias = set()
+        load_device = self.aphrodite_config.load_config.device or self.device_config.device
 
         def auto_load_lm_head_bias(weights):
             for name, weight in weights:
                 if name.endswith("lm_head.bias") and self.pp_group.is_last_rank:
-                    self.lm_head._register_bias()
+                    # load_weights is called outside Aphrodite's device context,
+                    # so we must enter it again when registering the bias.
+                    with torch.device(load_device):
+                        self.lm_head._register_bias()
                     self.lm_head.bias.weight_loader(self.lm_head.bias, weight)
                     lm_head_bias.add(name)
                 else:

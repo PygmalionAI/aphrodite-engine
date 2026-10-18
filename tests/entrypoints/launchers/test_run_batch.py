@@ -22,7 +22,7 @@ from aphrodite.entrypoints.launchers.run_batch import (
     upload_data,
 )
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.utils.mem_constants import MiB_bytes
 
 CHAT_MODEL_NAME = "hmellor/tiny-random-LlamaForCausalLM"
@@ -509,9 +509,7 @@ def test_completions():
 
 
 def test_completions_invalid_input():
-    """
-    Ensure that we fail when the input doesn't conform to the openai api.
-    """
+    """Ensure that we fail when the input doesn't conform to the openai api."""
     with (
         tempfile.NamedTemporaryFile("w") as input_file,
         tempfile.NamedTemporaryFile("r") as output_file,
@@ -602,9 +600,7 @@ def test_score(input_batch):
 
 
 def test_reasoning_parser():
-    """
-    Test that reasoning_parser parameter works correctly in run_batch.
-    """
+    """Test that reasoning_parser parameter works correctly in run_batch."""
     with (
         tempfile.NamedTemporaryFile("w") as input_file,
         tempfile.NamedTemporaryFile("r") as output_file,
@@ -765,8 +761,7 @@ def test_translation():
 
 
 def test_tool_calling():
-    """
-    Test that tool calling works correctly in run_batch.
+    """Test that tool calling works correctly in run_batch.
     Verifies that requests with tools return tool_calls in the response.
     """
     with (
@@ -870,7 +865,7 @@ async def test_download_bytes_data_url_bypasses_domain_check():
 async def test_download_bytes_rejects_disallowed_domain():
     """HTTP URLs whose hostname is not in the allowlist must be rejected."""
     url = "https://evil.internal/secret"
-    with pytest.raises(APHRODITEValidationError, match="allowed domains") as exc_info:
+    with pytest.raises(AphroditeValidationError, match="allowed domains") as exc_info:
         await download_bytes_from_url(url, allowed_media_domains=["example.com"])
     # URL validation failures carry structured metadata for the frontend.
     assert exc_info.value.parameter == "url"
@@ -880,7 +875,7 @@ async def test_download_bytes_rejects_disallowed_domain():
 @pytest.mark.asyncio
 async def test_download_bytes_rejects_unsupported_scheme():
     """Unsupported URL schemes are rejected with structured metadata."""
-    with pytest.raises(APHRODITEValidationError, match="Unsupported URL scheme") as exc_info:
+    with pytest.raises(AphroditeValidationError, match="Unsupported URL scheme") as exc_info:
         await download_bytes_from_url("ftp://example.com/file")
     assert exc_info.value.parameter == "url"
     assert exc_info.value.value == "ftp"
@@ -890,7 +885,7 @@ async def test_download_bytes_rejects_unsupported_scheme():
 async def test_download_bytes_rejects_cloud_metadata_ip():
     """Cloud metadata endpoints must be blocked when an allowlist is set."""
     url = "http://169.254.169.254/latest/meta-data/"
-    with pytest.raises(APHRODITEValidationError, match="allowed domains"):
+    with pytest.raises(AphroditeValidationError, match="allowed domains"):
         await download_bytes_from_url(url, allowed_media_domains=["example.com"])
 
 
@@ -902,7 +897,7 @@ async def test_download_bytes_rejects_internal_ip():
         "http://192.168.1.1/admin",
         "http://127.0.0.1:8080/internal",
     ]:
-        with pytest.raises(APHRODITEValidationError, match="allowed domains"):
+        with pytest.raises(AphroditeValidationError, match="allowed domains"):
             await download_bytes_from_url(internal_url, allowed_media_domains=["example.com"])
 
 
@@ -940,17 +935,17 @@ async def test_download_bytes_no_allowlist_permits_any_domain():
 async def test_download_bytes_empty_allowlist_denies_all():
     """An empty allowlist must deny all HTTP URLs (least privilege)."""
     url = "https://any-domain.example.org/file.wav"
-    with pytest.raises(APHRODITEValidationError, match="allowed domains"):
+    with pytest.raises(AphroditeValidationError, match="allowed domains"):
         await download_bytes_from_url(url, allowed_media_domains=[])
 
 
 @pytest.mark.asyncio
 async def test_download_bytes_unsupported_scheme():
     """Unsupported URL schemes must be rejected regardless of allowlist."""
-    with pytest.raises(APHRODITEValidationError, match="Unsupported URL scheme"):
+    with pytest.raises(AphroditeValidationError, match="Unsupported URL scheme"):
         await download_bytes_from_url("ftp://example.com/file.wav")
 
-    with pytest.raises(APHRODITEValidationError, match="Unsupported URL scheme"):
+    with pytest.raises(AphroditeValidationError, match="Unsupported URL scheme"):
         await download_bytes_from_url(
             "ftp://example.com/file.wav",
             allowed_media_domains=["example.com"],
@@ -965,7 +960,7 @@ async def test_download_bytes_backslash_bypass():
     The fix normalizes through urllib3 before handing to aiohttp.
     """
     bypass_url = "http://allowed.example.com\\@evil.internal/secret"
-    with pytest.raises(APHRODITEValidationError, match="allowed domains"):
+    with pytest.raises(AphroditeValidationError, match="allowed domains"):
         await download_bytes_from_url(bypass_url, allowed_media_domains=["evil.internal"])
 
 
@@ -1064,15 +1059,30 @@ def _make_aiohttp_put_session(status: int = 200, body_text: str = ""):
 
 
 @pytest.mark.asyncio
-async def test_upload_data_uploads_once_on_success():
-    """A successful upload must not be retried (regression guard)."""
-    session = _make_aiohttp_put_session(status=200)
-    with patch(
-        "aphrodite.entrypoints.launchers.run_batch.aiohttp.ClientSession",
-        return_value=session,
+@pytest.mark.parametrize("status", [200, 201, 204])
+@pytest.mark.parametrize("from_file", [False, True])
+async def test_upload_data_uploads_once_on_success(status, from_file, tmp_path):
+    """Successful PUT responses must not retry either upload path."""
+    session = _make_aiohttp_put_session(status=status)
+    data_or_file = "payload"
+    if from_file:
+        path = tmp_path / "output.jsonl"
+        path.write_text(data_or_file, encoding="utf-8")
+        data_or_file = str(path)
+
+    with (
+        patch(
+            "aphrodite.entrypoints.launchers.run_batch.aiohttp.ClientSession",
+            return_value=session,
+        ),
+        patch(
+            "aphrodite.entrypoints.launchers.run_batch.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
     ):
-        await upload_data("https://example.com/output.jsonl", "payload", from_file=False)
+        await upload_data("https://example.com/output.jsonl", data_or_file, from_file=from_file)
     assert session.put.call_count == 1
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.asyncio

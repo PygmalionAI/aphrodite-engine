@@ -28,7 +28,7 @@ echo "Launching prefill instance on port $PREFILL_PORT..."
 CUDA_VISIBLE_DEVICES=0 \
 APHRODITE_NIXL_SIDE_CHANNEL_HOST=$APHRODITE_HOST_IP \
 APHRODITE_NIXL_SIDE_CHANNEL_PORT=14590 \
-python -m aphrodite.endpoints.openai.api_server \
+python -m aphrodite.entrypoints.openai.api_server \
     --model $MODEL \
     --port $PREFILL_PORT \
     --max-model-len 1024 \
@@ -55,7 +55,7 @@ echo "Launching decode instance on port $DECODE_PORT..."
 CUDA_VISIBLE_DEVICES=1 \
 APHRODITE_NIXL_SIDE_CHANNEL_HOST=$APHRODITE_HOST_IP \
 APHRODITE_NIXL_SIDE_CHANNEL_PORT=14591 \
-python -m aphrodite.endpoints.openai.api_server \
+python -m aphrodite.entrypoints.openai.api_server \
     --model $MODEL \
     --port $DECODE_PORT \
     --max-model-len 1024 \

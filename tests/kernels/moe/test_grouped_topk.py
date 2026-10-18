@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Tests for the MoE grouped topk kernel
+"""Tests for the MoE grouped topk kernel.
 
 Run `pytest tests/kernels/moe/test_grouped_topk.py`.
 """
@@ -15,12 +15,40 @@ from aphrodite.config import (
     get_cached_compilation_config,
     set_current_aphrodite_config,
 )
+from aphrodite.forward_context import set_forward_context
 from aphrodite.model_executor.layers.fused_moe.router.grouped_topk_router import (
     GroupedTopk,
+    GroupedTopKRouter,
     fused_grouped_topk,
 )
 from aphrodite.platforms import current_platform
 from aphrodite.utils.torch_utils import set_random_seed
+
+
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="This test is skipped on non-CUDA platform.")
+@pytest.mark.parametrize("skip_padding", [False, True])
+def test_kimi_grouped_topk_masks_padding_when_enabled(skip_padding: bool):
+    hidden_states = torch.randn((2, 16), device="cuda")
+    gating_output = torch.randn((2, 896), device="cuda")
+    is_padding = torch.tensor([False, True], device="cuda")
+    router = GroupedTopKRouter(
+        top_k=16,
+        global_num_experts=896,
+        num_expert_group=1,
+        topk_group=1,
+        skip_padding=skip_padding,
+    )
+
+    with set_forward_context(None, AphroditeConfig(), is_padding=is_padding):
+        topk_weights, topk_ids = router._compute_routing(hidden_states, gating_output, torch.int32)
+
+    assert torch.all(topk_ids[0] >= 0)
+    if skip_padding:
+        assert torch.all(topk_ids[1] == -1)
+        assert torch.all(topk_weights[1] == 0)
+    else:
+        assert torch.all(topk_ids[1] >= 0)
+        assert torch.all(topk_weights[1] > 0)
 
 
 @pytest.mark.skipif(not current_platform.is_cuda(), reason="This test is skipped on non-CUDA platform.")

@@ -26,7 +26,7 @@ from transformers.feature_extraction_utils import BatchFeature
 from transformers.modeling_outputs import BaseModelOutput
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import AudioDummyOptions, BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.attention.mm_encoder_attention import MMEncoderAttention
 from aphrodite.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
@@ -486,7 +486,7 @@ class FunAudioChatProcessingInfo(BaseProcessingInfo):
         return TokenizersBackend.from_pretrained(
             self.model_id,
             subfolder="speech_tokenizer",
-            revision=self.ctx.model_config.tokenizer_revision,
+            revision=self.ctx.model_config.revision,
         )
 
     def get_feature_extractor(self) -> WhisperFeatureExtractor:
@@ -535,7 +535,7 @@ class FunAudioChatDummyInputsBuilder(BaseDummyInputsBuilder[FunAudioChatProcessi
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
         feature_extractor = self.info.get_feature_extractor()
         sampling_rate = int(feature_extractor.sampling_rate)
@@ -552,15 +552,12 @@ class FunAudioChatDummyInputsBuilder(BaseDummyInputsBuilder[FunAudioChatProcessi
             1,
             (target_num_frames * sampling_rate + token_fps - 1) // token_fps,
         )
-        num_audios = int(mm_counts.get("audio", 0))
 
-        audio_overrides = mm_options.get("audio")
-        assert audio_overrides is None or isinstance(audio_overrides, AudioDummyOptions)
         return {
             "audio": self._get_dummy_audios(
                 length=audio_len,
-                num_audios=num_audios,
-                overrides=audio_overrides,
+                num_audios=int(mm_counts.get("audio", 0)),
+                overrides=mm_options.get("audio"),
             )
         }
 
@@ -569,27 +566,25 @@ class FunAudioChatMultiModalProcessor(BaseMultiModalProcessor[FunAudioChatProces
     def _apply_hf_processor_main(
         self,
         mm_items: MultiModalDataItems,
-        hf_processor_mm_kwargs: Mapping[str, object],
+        hf_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        valid_mm_items = mm_items.select({k for k, c in mm_items.get_all_counts().items() if c > 0})
-        mm_data, passthrough_data = self._get_hf_mm_data(valid_mm_items)
+        mm_data, hf_kwargs, passthrough_data = self._get_hf_mm_inputs(mm_items, hf_kwargs)
 
         if not mm_data:
-            return BatchFeature(dict(passthrough_data))
+            return self._finalize_hf_mm_data(mm_data, hf_kwargs, passthrough_data)
 
         prompt_text = self.dummy_inputs.get_dummy_text(mm_items.get_all_counts())
 
         tokenizer = self.info.get_tokenizer()
         input_ids = torch.tensor([tokenizer.encode(prompt_text)])
 
-        audios = mm_data.get("audios", [])
+        audios = mm_data.get("audio", [])
         if not audios:
             processed_data = BatchFeature({"input_ids": input_ids})
-            processed_data.update(passthrough_data)
-            return processed_data
+            return self._finalize_hf_mm_data(mm_data, hf_kwargs, passthrough_data, processed_data)
         assert isinstance(audios, Sequence)
 
-        feature_extractor = self.info.get_feature_extractor(**hf_processor_mm_kwargs)
+        feature_extractor = self.info.get_feature_extractor(**hf_kwargs)
         sr = int(feature_extractor.sampling_rate)
         min_samples = int(getattr(feature_extractor, "n_fft", 400) or 400)
 
@@ -637,8 +632,7 @@ class FunAudioChatMultiModalProcessor(BaseMultiModalProcessor[FunAudioChatProces
         }
 
         processed_data = BatchFeature({"input_ids": input_ids, **mm_inputs})
-        processed_data.update(passthrough_data)
-        return processed_data
+        return self._finalize_hf_mm_data(mm_data, hf_kwargs, passthrough_data, processed_data)
 
     def _get_mm_fields_config(
         self,

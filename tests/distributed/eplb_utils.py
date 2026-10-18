@@ -13,6 +13,7 @@ from aphrodite.config import AphroditeConfig, set_current_aphrodite_config
 from aphrodite.distributed.parallel_state import (
     init_distributed_environment,
 )
+from aphrodite.platforms import current_platform
 from aphrodite.utils.system_utils import update_environment_variables
 
 mp.set_start_method("spawn", force=True)
@@ -73,13 +74,16 @@ def distributed_run(fn, world_size, *args):
 def set_env_vars_and_device(env: dict[str, str]) -> None:
     update_environment_variables(env)
     local_rank = os.environ["LOCAL_RANK"]
-    device = torch.device(f"cuda:{local_rank}")
+    accelerator_type = torch.accelerator.current_accelerator().type
+    device = torch.device(f"{accelerator_type}:{local_rank}")
     torch.accelerator.set_device_index(device)
+
+    backend = "xccl" if current_platform.is_xpu() else "nccl"
 
     # Create a minimal aphrodite config for init_distributed_environment
     aphrodite_config = AphroditeConfig()
     with set_current_aphrodite_config(aphrodite_config):
-        init_distributed_environment()
+        init_distributed_environment(backend=backend)
     atexit.register(_destroy_process_group_if_initialized)
     # Ensure each worker process has the same random seed
     random.seed(42)

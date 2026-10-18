@@ -73,7 +73,6 @@ def test_online_serving(aphrodite_runner, audio_assets: AudioTestAssets):
 
     Steps run sequentially so each releases the GPU before the next starts.
     """
-
     question = f"What's happening in these {len(audio_assets)} audio clips?"
     max_tokens = 10
     audio_data = [asset.audio_and_sample_rate for asset in audio_assets]
@@ -142,10 +141,6 @@ def test_online_serving(aphrodite_runner, audio_assets: AudioTestAssets):
     )
 
 
-@pytest.mark.skip(
-    reason="VoxtralProcessor.apply_chat_template() in transformers v5 "
-    "doesn't resolve chat_template=None to the default template"
-)
 def test_hf_reference(hf_runner, aphrodite_runner, audio_assets: AudioTestAssets):
     """Compare Aphrodite Mistral-format output against HF Transformers reference.
 
@@ -153,9 +148,6 @@ def test_hf_reference(hf_runner, aphrodite_runner, audio_assets: AudioTestAssets
     attention backends), we compare per-token logprobs using the standard
     check_logprobs_close helper: when tokens diverge at a position, each
     runner's chosen token must appear in the other's top-k logprobs.
-
-    Marked xfail(strict=False) so remaining edge-case mismatches
-    don't block CI.
     """
     question = f"What's happening in these {len(audio_assets)} audio clips?"
     max_tokens = 10

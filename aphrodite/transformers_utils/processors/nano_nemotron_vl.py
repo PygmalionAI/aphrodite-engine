@@ -20,7 +20,7 @@ import numpy.typing as npt
 import regex as re
 import torch
 from PIL import Image
-from transformers import BatchFeature, PretrainedConfig, TensorType
+from transformers import BatchFeature, PreTrainedConfig, TensorType
 
 from aphrodite.model_executor.models.parakeet import ParakeetExtractor
 from aphrodite.multimodal.inputs import AudioItem
@@ -284,8 +284,7 @@ class DynamicResolutionImageTiler:
         self,
         target_num_tokens_post_shuffle: int,
     ) -> tuple[int, int]:
-        """
-        TODO: optimize this so it squeezes closer to target number of tokens.
+        """TODO: optimize this so it squeezes closer to target number of tokens.
         Calculate image dimensions that produce approximately `target` tokens after
         pixel_shuffle.
 
@@ -308,6 +307,7 @@ class DynamicResolutionImageTiler:
         >>> assert width, height == (2880, 2880)
         >>> assert (width // PATCH_SIZE) * (height // PATCH_SIZE) // 2**2 == 8100  # tokens post-shuffle
         >>> assert tiler._get_num_embeddings(width=width, height=height) == 8100
+
         """
         side_pixels = math.isqrt(target_num_tokens_post_shuffle) * self._downsample_ratio * self._patch_size
         assert isinstance(side_pixels, int) and side_pixels % self._patch_size == 0
@@ -372,6 +372,7 @@ class DynamicResolutionImageTiler:
             num_tokens_available: Number of tokens available for this media
         Returns:
             DynamicResolutionParams for the media
+
         """
         current_num_tokens_available = num_tokens_available
         assert isinstance(media, Image.Image), "Dynamic resolution is only supported for image media"
@@ -444,6 +445,7 @@ class DynamicResolutionImageTiler:
             num_tokens_available: Total number of tokens available across all media
         Returns:
             List of ImageTilingParams for each media item
+
         """
         num_tokens_available = num_tokens_available * (4 if self.PIXEL_SHUFFLE else 1) * (4 if self.CONV_MERGING else 1)
         # When the number of available token is too small,
@@ -504,7 +506,7 @@ class DynamicResolutionImageTiler:
         raise ValueError(f"Should be unreachable - `return params` above must be reached: {ctx}")
 
     @staticmethod
-    def stack(images: list[torch.Tensor], patch_size: int) -> torch.Tensor:
+    def stack(images: list[torch.Tensor] | torch.Tensor, patch_size: int) -> torch.Tensor:
         assert len(images) > 0, "No images to stack"
 
         def rearrange_img(x):
@@ -526,8 +528,7 @@ class DynamicResolutionImageTiler:
 
 
 class BaseNanoNemotronVLProcessor(ABC):
-    """
-    This model doesn't define its own HF processor,
+    """This model doesn't define its own HF processor,
     so we implement our own one here.
 
     The code to insert image tokens is based on:
@@ -536,7 +537,7 @@ class BaseNanoNemotronVLProcessor(ABC):
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         tokenizer: HfTokenizer,
         *args,
         max_model_len: int,
@@ -573,7 +574,7 @@ class BaseNanoNemotronVLProcessor(ABC):
         self.dtype: torch.dtype = getattr(config, "dtype", torch.float32)
 
     @staticmethod
-    def use_dynamic_resolution(config: PretrainedConfig) -> bool:
+    def use_dynamic_resolution(config: PreTrainedConfig) -> bool:
         return "min_num_patches" in config.vision_config.args
 
     @property
@@ -698,15 +699,14 @@ class BaseNanoNemotronVLProcessor(ABC):
 
 
 class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
-    """
-    HF Processor with extended video processing logic.
+    """HF Processor with extended video processing logic.
     Code for video processing is adapted from video example:
     https://huggingface.co/OpenGVLab/InternVL3-1B#inference-with-transformers
     """
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         tokenizer: HfTokenizer,
         *,
         max_model_len: int,
@@ -1033,8 +1033,7 @@ class NanoNemotronVLProcessor(BaseNanoNemotronVLProcessor):
         img_context_token_ids: list[int],
         video_temporal_patch_size: int = 1,
     ) -> PromptUpdateDetails:
-        """
-        Build prompt replacement for a video.
+        """Build prompt replacement for a video.
         The replacement returned is not actually used to replace the placeholder
         tokens - it's just used to make sure we allocate the correct number
         of tokens.

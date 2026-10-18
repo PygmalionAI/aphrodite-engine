@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 from aphrodite.config import AphroditeConfig, ModelConfig
-from aphrodite.entrypoints.chat_utils import ChatTemplateConfig
 from aphrodite.logger import init_logger
 from aphrodite.plugins.io_processors import has_io_processor
 from aphrodite.renderers import BaseRenderer
+from aphrodite.renderers.chat_utils import ChatTemplateConfig
 from aphrodite.tasks import POOLING_TASKS, SCORE_TYPE_MAP, SupportedTask
 
 from .base.io_processor import PoolingIOProcessor
@@ -151,7 +151,7 @@ def init_pooling_state(
     if model_config is None:
         return
 
-    from aphrodite.entrypoints.chat_utils import load_chat_template
+    from aphrodite.renderers.chat_utils import load_chat_template
     from aphrodite.tasks import POOLING_TASKS
 
     from .classify.serving import ServingClassification
@@ -166,6 +166,7 @@ def init_pooling_state(
         chat_template=resolved_chat_template,
         chat_template_content_format=args.chat_template_content_format,
         trust_request_chat_template=args.trust_request_chat_template,
+        trust_request_mm_kwargs=args.trust_request_mm_kwargs,
     )
 
     state.serving_pooling = (

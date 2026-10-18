@@ -3,10 +3,9 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Self
 
 import torch
-from typing_extensions import Self
 
 from aphrodite.model_executor.layers.quantization.input_quant_fp8 import QuantFP8
 from aphrodite.model_executor.layers.quantization.utils.fp8_utils import (
@@ -37,6 +36,18 @@ class FP8BlockParams(FP8Params):
             input_scale=getattr(layer, cls.INPUT_SCALE, None),
             input_scale_ub=getattr(layer, cls.INPUT_SCALE_UB, None),
         )
+
+    @property
+    def block_scale_attr(self) -> str:
+        """Fp8LinearMethod registers the block scale as ``weight_scale_inv``,
+        compressed-tensors as ``weight_scale``."""
+        return self.WEIGHT_SCALE if self.weight_scale_inv is None else self.WEIGHT_SCALE_INV
+
+    @property
+    def block_scale(self) -> torch.Tensor:
+        scale = getattr(self, self.block_scale_attr)
+        assert scale is not None
+        return scale
 
 
 class Fp8BlockScaledMMLinearKernel(MMLinearKernel[FP8ScaledMMLinearLayerConfig, FP8BlockParams], ABC):
@@ -72,17 +83,13 @@ class Fp8BlockScaledMMLinearKernel(MMLinearKernel[FP8ScaledMMLinearLayerConfig, 
 
     def process_weights_after_loading(self, layer: torch.nn.Module):
         params = self._get_layer_params(layer)
-        # Fp8LinearMethod registered weight scale
-        # buffer as weight_scale_inv unlike compressed tensors.
-        weight_scale = params.weight_scale if params.weight_scale_inv is None else params.weight_scale_inv
-        scale_attr_name = params.WEIGHT_SCALE if params.weight_scale_inv is None else params.WEIGHT_SCALE_INV
         new_weight, new_weight_scale = process_fp8_weight_block_strategy(
             params.weight,
-            weight_scale,
+            params.block_scale,
         )
 
         replace_parameter(layer, params.WEIGHT, new_weight.data)
-        replace_parameter(layer, scale_attr_name, new_weight_scale.data)
+        replace_parameter(layer, params.block_scale_attr, new_weight_scale.data)
 
     def apply_weights(
         self,
@@ -94,7 +101,7 @@ class Fp8BlockScaledMMLinearKernel(MMLinearKernel[FP8ScaledMMLinearLayerConfig, 
         out_dtype = self.config.out_dtype
         params = self._get_layer_params(layer)
         weight = params.weight
-        weight_scale = params.weight_scale if params.weight_scale_inv is None else params.weight_scale_inv
+        weight_scale = params.block_scale
         input_scale = params.input_scale
         scale_up = params.input_scale_ub
 

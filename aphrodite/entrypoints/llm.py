@@ -3,13 +3,12 @@
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import cloudpickle
 import torch.nn as nn
 from pydantic import ValidationError
 from tqdm.auto import tqdm
-from typing_extensions import overload
 
 from aphrodite.config import (
     AttentionConfig,
@@ -28,25 +27,23 @@ from aphrodite.config.model import (
     TokenizerMode,
 )
 from aphrodite.config.quantization import QuantizationConfigArgs
-from aphrodite.distributed.weight_transfer.base import (
-    WeightTransferInitRequest,
-    WeightTransferUpdateRequest,
-)
 from aphrodite.engine.arg_utils import EngineArgs
-from aphrodite.entrypoints.chat_utils import (
-    ChatCompletionMessageParam,
-    ChatTemplateContentFormatOption,
-    load_chat_template,
-)
+from aphrodite.entrypoints.common.offline import _O, _R, OfflineInferenceMixin
 from aphrodite.entrypoints.generate.beam_search.offline import BeamSearchOfflineMixin
 from aphrodite.entrypoints.pooling.offline import PoolingOfflineMixin
+from aphrodite.entrypoints.rl.offline import RLOfflineMixin
 from aphrodite.entrypoints.serve.utils.api_utils import log_non_default_args
 from aphrodite.inputs import PromptType
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_if_needed, init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.model_executor.layers.quantization import QuantizationMethods
 from aphrodite.outputs import PoolingRequestOutput, RequestOutput
 from aphrodite.platforms import current_platform
+from aphrodite.renderers.chat_utils import (
+    ChatCompletionMessageParam,
+    ChatTemplateContentFormatOption,
+    load_chat_template,
+)
 from aphrodite.sampling_params import SamplingParams
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.usage.usage_lib import UsageContext
@@ -56,7 +53,6 @@ from aphrodite.v1.engine.llm_engine import LLMEngine
 from aphrodite.v1.sample.logits_processor import LogitsProcessor
 
 from ..renderers import ChatParams
-from .offline_utils import _O, _R, OfflineInferenceMixin
 
 if TYPE_CHECKING:
     from aphrodite.v1.metrics.reader import Metric
@@ -64,7 +60,7 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
-class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
+class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, RLOfflineMixin, OfflineInferenceMixin):
     """An LLM for generating texts from given prompts and sampling parameters.
 
     This class includes a tokenizer, a language model (possibly distributed
@@ -76,8 +72,8 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
     Args:
         model: The name or path of a HuggingFace Transformers model.
         tokenizer: The name or path of a HuggingFace Transformers tokenizer.
-        tokenizer_mode: The tokenizer mode. "auto" will use the fast tokenizer
-            if available, and "slow" will always use the slow tokenizer.
+        tokenizer_mode: The tokenizer mode. See
+            [ModelConfig.tokenizer_mode][aphrodite.config.ModelConfig.tokenizer_mode].
         skip_tokenizer_init: If true, skip initialization of tokenizer and
             detokenizer. Expect valid prompt_token_ids and None for prompt
             from the input.
@@ -174,6 +170,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
     Note:
         This class is intended to be used for offline inference. For online
         serving, use the [AsyncLLMEngine][aphrodite.AsyncLLMEngine] class instead.
+
     """
 
     def __init__(
@@ -222,7 +219,6 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         **kwargs: Any,
     ) -> None:
         """LLM constructor."""
-
         if "disable_log_stats" not in kwargs:
             kwargs["disable_log_stats"] = True
 
@@ -323,6 +319,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             **kwargs,
         )
 
+        configure_logging_if_needed(engine_args.create_logging_config())
         log_non_default_args(engine_args)
 
         self.llm_engine = LLMEngine.from_engine_args(engine_args=engine_args, usage_context=UsageContext.LLM_CLASS)
@@ -381,6 +378,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         Returns:
             The world size (tensor_parallel_size * pipeline_parallel_size),
             optionally multiplied by data_parallel_size if include_dp is True.
+
         """
         parallel_config = self.llm_engine.aphrodite_config.parallel_config
         if include_dp:
@@ -405,7 +403,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         *,
         use_tqdm: bool | Callable[..., tqdm] = True,
         lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
-        priority: list[int] | None = None,
+        priority: int | Sequence[int] | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
     ) -> list[RequestOutput]:
@@ -431,15 +429,16 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
                 Only applicable when priority scheduling policy is enabled.
-                If provided, must be a list of integers matching the length
-                of `prompts`, where each priority value corresponds to the prompt
-                at the same index.
+                When it is a single value, it is applied to every prompt.
+                When it is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
             tokenization_kwargs: Overrides for `tokenizer.encode`.
             mm_processor_kwargs: Overrides for `processor.__call__`.
 
         Returns:
             A list of `RequestOutput` objects containing the
             generated completions in the same order as the input prompts.
+
         """
         runner_type = self.model_config.runner_type
         if runner_type != "generate":
@@ -468,7 +467,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         prompts: PromptType | Sequence[PromptType],
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
-        priority: list[int] | None = None,
+        priority: int | Sequence[int] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
@@ -484,12 +483,17 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             sampling_params: The sampling parameters for text generation.
             lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
+                Only applicable when priority scheduling policy is enabled.
+                When it is a single value, it is applied to every prompt.
+                When it is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
             use_tqdm: If True, shows a tqdm progress bar while adding requests.
             tokenization_kwargs: Overrides for `tokenizer.encode`.
             mm_processor_kwargs: Overrides for `processor.__call__`.
 
         Returns:
             A list of request IDs for the enqueued requests.
+
         """
         runner_type = self.model_config.runner_type
         if runner_type != "generate":
@@ -541,6 +545,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
 
         Returns:
             A list of output objects for all completed requests.
+
         """
         if output_type is None:
             output_type = (RequestOutput, PoolingRequestOutput)
@@ -554,8 +559,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
     ) -> list[_R]:
-        """
-        Execute an RPC call on all workers.
+        """Execute an RPC call on all workers.
 
         Args:
             method: Name of the worker method to execute, or a callable that
@@ -575,13 +579,12 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         Note:
             It is recommended to use this API to only pass control messages,
             and set up data-plane communication to pass data.
-        """
 
+        """
         return self.llm_engine.collective_rpc(method, timeout, args, kwargs)
 
     def apply_model(self, func: Callable[[nn.Module], _R]) -> list[_R]:
-        """
-        Run a function directly on the model inside each worker,
+        """Run a function directly on the model inside each worker,
         returning the result for each of them.
 
         !!! warning
@@ -598,6 +601,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
         lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
+        priority: int | Sequence[int] | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
         add_generation_prompt: bool = True,
@@ -607,8 +611,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         tokenization_kwargs: dict[str, Any] | None = None,
         mm_processor_kwargs: dict[str, Any] | None = None,
     ) -> list[RequestOutput]:
-        """
-        Generate responses for a chat conversation.
+        """Generate responses for a chat conversation.
 
         The chat conversation is converted into a text prompt using the
         tokenizer and calls the [generate][aphrodite.LLM.generate] method to generate
@@ -633,6 +636,11 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                 it is used to create the progress bar.
                 If `False`, no progress bar is created.
             lora_request: LoRA request to use for generation, if any.
+            priority: The priority of the requests, if any.
+                Only applicable when priority scheduling policy is enabled.
+                When it is a single value, it is applied to every prompt.
+                When it is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
             chat_template: The template to use for structuring the chat.
                 If not provided, the model's default chat template will be used.
             chat_template_content_format: The format to render message content.
@@ -652,10 +660,12 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                 template.
             tokenization_kwargs: Overrides for `tokenizer.encode`.
             mm_processor_kwargs: Overrides for `processor.__call__`.
+            tools: Tools to make available to the model, if any.
 
         Returns:
             A list of `RequestOutput` objects containing the generated
             responses in the same order as the input messages.
+
         """
         model_config = self.model_config
         runner_type = model_config.runner_type
@@ -675,6 +685,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             output_type=RequestOutput,
             use_tqdm=use_tqdm,
             lora_request=lora_request,
+            priority=priority,
             chat_template=chat_template,
             chat_template_content_format=chat_template_content_format,
             chat_template_kwargs=chat_template_kwargs,
@@ -691,7 +702,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         sampling_params: SamplingParams | Sequence[SamplingParams] | None = None,
         use_tqdm: bool | Callable[..., tqdm] = True,
         lora_request: Sequence[LoRARequest] | LoRARequest | None = None,
-        priority: list[int] | None = None,
+        priority: int | Sequence[int] | None = None,
         chat_template: str | None = None,
         chat_template_content_format: ChatTemplateContentFormatOption = "auto",
         add_generation_prompt: bool = True,
@@ -718,6 +729,10 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                 conversations.
             lora_request: LoRA request to use for generation, if any.
             priority: The priority of the requests, if any.
+                Only applicable when priority scheduling policy is enabled.
+                When it is a single value, it is applied to every prompt.
+                When it is a list, the list must have the same length as the
+                prompts and it is paired one by one with the prompt.
             chat_template: The template to use for structuring the chat.
             chat_template_content_format: The format to render message content.
             add_generation_prompt: If True, adds a generation template
@@ -732,6 +747,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
 
         Returns:
             A list of request IDs for the enqueued requests.
+
         """
         model_config = self.model_config
         runner_type = model_config.runner_type
@@ -761,15 +777,30 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             mm_processor_kwargs=mm_processor_kwargs,
         )
 
-    def start_profile(self, profile_prefix: str | None = None) -> None:
-        """Start profiling with optional custom trace prefix.
+    def start_profile(
+        self,
+        profile_prefix: str | None = None,
+        *,
+        delay_iterations: int | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
+        """Start profiling with optional per-session overrides.
 
         Args:
             profile_prefix: Optional prefix for the trace file names. If provided,
                            trace files will be named as "<prefix>_dp<X>_pp<Y>_tp<Z>".
                            If not provided, default naming will be used.
+            delay_iterations: Optional number of worker iterations to skip before
+                profiling starts.
+            max_iterations: Optional maximum number of worker iterations to profile.
+                Zero means no limit.
+
         """
-        self.llm_engine.start_profile(profile_prefix)
+        self.llm_engine.start_profile(
+            profile_prefix,
+            delay_iterations=delay_iterations,
+            max_iterations=max_iterations,
+        )
 
     def stop_profile(self) -> None:
         self.llm_engine.stop_profile()
@@ -778,8 +809,7 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
         return self.llm_engine.reset_prefix_cache(reset_running_requests, reset_connector)
 
     def sleep(self, level: int = 1, mode: PauseMode = "abort"):
-        """
-        Put the engine to sleep. The engine should not process any requests.
+        """Put the engine to sleep. The engine should not process any requests.
         The caller should guarantee that no requests are being processed
         during the sleep period, before `wake_up` is called.
 
@@ -799,12 +829,20 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                            CPU memory pressure.
             mode: How to handle any existing requests, can be "abort", "wait",
                 or "keep".
+
         """
         self.llm_engine.sleep(level=level, mode=mode)
 
-    def wake_up(self, tags: list[str] | None = None):
+    def release_kv_cache_memory(self) -> None:
+        """Release the GPU physical memory backing the KV cache.
+
+        Requires a completed ``sleep(level=0)`` and resident executor memory.
+        Restore with ``wake_up(tags=["kv_cache"])``; kept requests are recomputed.
         """
-        Wake up the engine from sleep mode. See the [sleep][aphrodite.LLM.sleep]
+        self.llm_engine.release_kv_cache_memory()
+
+    def wake_up(self, tags: list[str] | None = None) -> bool:
+        """Wake up the engine from sleep mode. See the [sleep][aphrodite.LLM.sleep]
         method for more details.
 
         Args:
@@ -814,8 +852,12 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
                 is reallocated. wake_up should be called with all tags
                 (or None) before the engine is used again.
                 Use tags=["scheduling"] to resume from level 0 sleep.
+
+        Returns:
+            Whether the engine is fully awake.
+
         """
-        self.llm_engine.wake_up(tags)
+        return self.llm_engine.wake_up(tags)
 
     def get_metrics(self) -> list["Metric"]:
         """Return a snapshot of aggregated metrics from Prometheus.
@@ -828,50 +870,6 @@ class LLM(BeamSearchOfflineMixin, PoolingOfflineMixin, OfflineInferenceMixin):
             This method is only available with the V1 LLM engine.
         """
         return self.llm_engine.get_metrics()
-
-    def init_weight_transfer_engine(self, request: WeightTransferInitRequest | dict) -> None:
-        """
-        Initialize weight transfer for RL training.
-
-        Args:
-            request: Weight transfer initialization request with backend-specific info
-        """
-        init_info_dict = request["init_info"] if isinstance(request, dict) else request.init_info
-
-        self.llm_engine.collective_rpc("init_weight_transfer_engine", kwargs={"init_info": init_info_dict})
-
-    def start_weight_update(self) -> None:
-        """Start a new weight update."""
-        self.llm_engine.collective_rpc("start_weight_update")
-
-    def update_weights(self, request: WeightTransferUpdateRequest | dict) -> None:
-        """
-        Update the weights of the model.
-
-        Args:
-            request: Weight update request with backend-specific update info
-        """
-        update_info_dict = request["update_info"] if isinstance(request, dict) else request.update_info
-
-        self.llm_engine.collective_rpc("update_weights", kwargs={"update_info": update_info_dict})
-
-    def finish_weight_update(self, weight_version: str | None = None) -> None:
-        """Finish the weight update and set its version if provided."""
-        self.llm_engine.collective_rpc("finish_weight_update")
-        if weight_version is not None:
-            self.llm_engine.set_weight_version(weight_version)
-
-    def update_weight_version(self, new_version: str) -> None:
-        """Set the weight version without updating weights."""
-        self.llm_engine.set_weight_version(new_version)
-
-    def get_weight_version(self) -> str:
-        """Return the latest committed weight version."""
-        return self.llm_engine.get_weight_version()
-
-    def start_draft_weight_update(self) -> None:
-        """Start a new weight update targeting the speculative draft model."""
-        self.llm_engine.collective_rpc("start_draft_weight_update")
 
     def __repr__(self) -> str:
         """Return a transformers-style hierarchical view of the model."""

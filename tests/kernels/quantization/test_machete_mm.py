@@ -36,7 +36,8 @@ CUDA_DEVICES = [f"cuda:{i}" for i in range(1 if torch.accelerator.device_count()
 #  `is_quant_method_supported` conflates kernels with quantization methods
 #  an assumption which is breaking down as quantizations methods can have
 #  have kernels and some kernels support multiple quantization methods.
-IS_SUPPORTED_BY_GPU = current_platform.get_device_capability()[0] >= 9
+capability = current_platform.get_device_capability()
+IS_SUPPORTED_BY_GPU = capability is not None and capability[0] >= 9
 
 MNK_SHAPES = [
     (1, 128, 128),
@@ -279,7 +280,7 @@ def test_machete_all_schedules(shape, types: TypeConfig):
     if types.group_scale_type is None:
         group_sizes = [None]
     else:
-        group_sizes = query_machete_supported_group_sizes(types.act_type)
+        group_sizes = list(query_machete_supported_group_sizes(types.act_type))
 
     for group_size in group_sizes:
         if not group_size_valid(shape, group_size):
@@ -306,7 +307,7 @@ def test_machete_heuristic(shape, types: TypeConfig):
     if types.group_scale_type is None:
         group_sizes = [None]
     else:
-        group_sizes = query_machete_supported_group_sizes(types.act_type)
+        group_sizes = list(query_machete_supported_group_sizes(types.act_type))
 
     for group_size in group_sizes:
         if not group_size_valid(shape, group_size):

@@ -10,6 +10,7 @@ from aphrodite.distributed.eplb.eplb_state import (
     compute_logical_maps,
 )
 from aphrodite.distributed.eplb.policy.default import DefaultEplbPolicy
+from aphrodite.platforms import current_platform
 
 
 def test_eplb_load_stats_reduce_across_ranks():
@@ -29,7 +30,7 @@ def test_eplb_load_stats_reduce_across_ranks():
 
 
 def test_basic_rebalance():
-    """Test basic rebalancing functionality"""
+    """Test basic rebalancing functionality."""
     # Example from https://github.com/deepseek-ai/eplb
     weight = torch.tensor(
         [
@@ -82,7 +83,7 @@ def test_basic_rebalance():
 
 
 def test_single_gpu_case():
-    """Test single GPU case"""
+    """Test single GPU case."""
     weight = torch.tensor([[10, 20, 30, 40]])
     num_replicas = 4
     num_groups = 1
@@ -103,7 +104,7 @@ def test_single_gpu_case():
 
 
 def test_equal_weights():
-    """Test case with equal weights"""
+    """Test case with equal weights."""
     weight = torch.tensor([[50, 50, 50, 50, 50, 50, 50, 50]])
     num_replicas = 8
     num_groups = 2
@@ -122,7 +123,7 @@ def test_equal_weights():
 
 
 def test_extreme_weight_imbalance():
-    """Test extreme weight imbalance case"""
+    """Test extreme weight imbalance case."""
     weight = torch.tensor([[1000, 1, 1, 1, 1, 1, 1, 1]])
     num_replicas = 12
     num_groups = 2
@@ -141,7 +142,7 @@ def test_extreme_weight_imbalance():
 
 
 def test_multiple_layers():
-    """Test multiple layers case"""
+    """Test multiple layers case."""
     weight = torch.tensor(
         [
             [10, 20, 30, 40, 50, 60],  # First layer
@@ -170,7 +171,7 @@ def test_multiple_layers():
 
 
 def test_parameter_validation():
-    """Test parameter validation"""
+    """Test parameter validation."""
     weight = torch.tensor([[10, 20, 30, 40]])
 
     # Test non-divisible case - this should handle normally without throwing
@@ -188,7 +189,7 @@ def test_parameter_validation():
 
 
 def test_small_scale_hierarchical():
-    """Test small-scale hierarchical load balancing"""
+    """Test small-scale hierarchical load balancing."""
     weight = torch.tensor(
         [
             [100, 50, 200, 75, 150, 25, 300, 80],  # 8 experts
@@ -214,7 +215,7 @@ def test_small_scale_hierarchical():
 
 
 def test_global_load_balance_fallback():
-    """Test global load balancing fallback case"""
+    """Test global load balancing fallback case."""
     # When num_groups % num_nodes != 0, should fall back to global load
     # balancing
     weight = torch.tensor([[10, 20, 30, 40, 50, 60]])
@@ -232,11 +233,13 @@ def test_global_load_balance_fallback():
     assert torch.sum(logcnt) == num_replicas
 
 
-@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("device", ["cpu", "cuda", "xpu"])
 def test_device_compatibility(device):
-    """Test device compatibility"""
+    """Test device compatibility."""
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA not available")
+    if device == "xpu" and not current_platform.is_xpu():
+        pytest.skip("XPU not available")
 
     weight = torch.tensor([[10, 20, 30, 40]], device=device)
     num_replicas = 6
@@ -254,8 +257,7 @@ def test_device_compatibility(device):
 
 
 def test_additional_cases():
-    """Test more edge cases and different parameter combinations"""
-
+    """Test more edge cases and different parameter combinations."""
     # Test case 1: Large-scale distributed setup
     weight1 = torch.tensor([[50, 100, 75, 120, 90, 60, 80, 110, 40, 70, 95, 85, 65, 55, 45, 35]])
     phy2log1 = DefaultEplbPolicy.rebalance_experts(weight1, 24, 8, 4, 8)
@@ -285,8 +287,7 @@ def test_additional_cases():
 
 
 def test_compute_logical_maps_with_negative_indices():
-    """
-    Test that compute_logical_maps correctly handles physical slots containing
+    """Test that compute_logical_maps correctly handles physical slots containing
     -1 (unused slots).
     """
     # 2 layers, 6 physical slots, 4 logical experts.

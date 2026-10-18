@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Cold start and warm start tests for Aphrodite-compile.
 
-Cold start runs in a forked child (must fork before CUDA init) which
+Cold start runs in a separate child process which
 populates on-disk caches and asserts cold-start counters.  Warm start
 then runs in the parent with clean in-memory state but populated caches.
 """
@@ -18,7 +18,7 @@ from aphrodite.compilation.counter import compilation_counter
 from aphrodite.config import CompilationConfig, CompilationMode, CUDAGraphMode, PassConfig
 from aphrodite.utils.torch_utils import is_torch_equal_or_newer
 
-from ...utils import fork_new_process_for_each_test
+from ...utils import create_new_process_for_each_test, requires_spawn_multiprocessing
 
 MODEL = "microsoft/Phi-tiny-MoE-instruct"
 
@@ -54,17 +54,17 @@ def _cold_start(aphrodite_runner):
     assert counters["aot_autograd"]["autograd_cache_hit"] == 0
 
 
-@fork_new_process_for_each_test
+@create_new_process_for_each_test()
 @pytest.mark.parametrize("mega_aot_artifact", ["0", "1"])
 def test_moe_startup(monkeypatch, aphrodite_runner, fresh_aphrodite_cache, mega_aot_artifact):
     monkeypatch.setenv("APHRODITE_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("APHRODITE_USE_MEGA_AOT_ARTIFACT", mega_aot_artifact)
     monkeypatch.setenv("APHRODITE_DEEP_GEMM_WARMUP", "skip")
 
-    # Cold start in a forked child (must fork before CUDA init).
+    # ROCm and XPU cannot fork safely after device discovery.
     # This model has 32 identical transformer layers which produce
     # 33 subgraphs after splitting on attention — only 3 are unique.
-    ctx = mp.get_context("fork")
+    ctx = mp.get_context("spawn") if requires_spawn_multiprocessing() else mp.get_context("fork")
     p = ctx.Process(target=_cold_start, args=(aphrodite_runner,))
     p.start()
     p.join()
@@ -211,13 +211,13 @@ def _cold_start_model(aphrodite_runner, spec: ModelStartupSpec):
 
 
 @pytest.mark.parametrize("spec", MODEL_SPECS)
-@fork_new_process_for_each_test
+@create_new_process_for_each_test()
 def test_model_startup(monkeypatch, aphrodite_runner, fresh_aphrodite_cache, spec):
     monkeypatch.setenv("APHRODITE_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("APHRODITE_DEEP_GEMM_WARMUP", "skip")
 
-    # Cold start in a forked child (must fork before CUDA init).
-    ctx = mp.get_context("fork")
+    # ROCm and XPU cannot fork safely after device discovery.
+    ctx = mp.get_context("spawn") if requires_spawn_multiprocessing() else mp.get_context("fork")
     p = ctx.Process(target=_cold_start_model, args=(aphrodite_runner, spec))
     p.start()
     p.join()

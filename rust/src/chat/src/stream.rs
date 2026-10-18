@@ -5,9 +5,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use aphrodite_llm::RequestTimestamps;
+use aphrodite_text::{DecodedLogprobs, DecodedPositionLogprobs, DecodedPromptLogprobs};
 use futures::Stream;
 use trait_set::trait_set;
-use aphrodite_text::{DecodedLogprobs, DecodedPositionLogprobs, DecodedPromptLogprobs};
 
 use crate::FinishReason;
 use crate::error::{Error, Result};
@@ -22,6 +23,7 @@ pub struct CollectedAssistantMessage {
     pub logprobs: Option<DecodedLogprobs>,
     pub token_ids: Vec<u32>,
     pub usage: ChatTokenUsage,
+    pub timestamps: RequestTimestamps,
     pub finish_reason: FinishReason,
     /// Connector-specific KV transfer parameters for disaggregated serving.
     pub kv_transfer_params: Option<serde_json::Value>,
@@ -81,6 +83,7 @@ impl ChatEventStream {
                 ChatEvent::Done {
                     message: done,
                     usage,
+                    timestamps,
                     finish_reason,
                     kv_transfer_params,
                     ec_transfer_params,
@@ -94,9 +97,10 @@ impl ChatEventStream {
                         }),
                         token_ids,
                         usage,
+                        timestamps,
                         finish_reason,
-                        kv_transfer_params,
-                        ec_transfer_params,
+                        kv_transfer_params: kv_transfer_params.map(|value| *value),
+                        ec_transfer_params: ec_transfer_params.map(|value| *value),
                     });
                 }
                 ChatEvent::ToolCallEnd { call, .. } => {
@@ -132,11 +136,11 @@ trait_set! {
 #[cfg(test)]
 mod tests {
 
-    use futures::stream;
     use aphrodite_llm::FinishReason;
     use aphrodite_text::{
         DecodedLogprobs, DecodedPositionLogprobs, DecodedPromptLogprobs, DecodedTokenLogprob,
     };
+    use futures::stream;
 
     use super::{ChatEventStream, CollectedAssistantMessage};
     use crate::error::Error;
@@ -200,6 +204,7 @@ mod tests {
                         output_token_count: 1,
                         cached_token_count: 0,
                     }),
+                    timestamps: Default::default(),
                     finish_reason: FinishReason::stop_eos(),
                     kv_transfer_params: None,
                     ec_transfer_params: None,
@@ -241,6 +246,7 @@ mod tests {
                     output_token_count: 1,
                     cached_token_count: 0,
                 }),
+                timestamps: Default::default(),
                 finish_reason: FinishReason::stop_eos(),
                 kv_transfer_params: None,
                 ec_transfer_params: None,

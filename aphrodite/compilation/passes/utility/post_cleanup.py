@@ -6,8 +6,7 @@ from ..aphrodite_inductor_pass import AphroditeInductorPass
 
 
 class PostCleanupPass(AphroditeInductorPass):
-    """
-    This pass performs cleanup after custom passes.
+    """This pass performs cleanup after custom passes.
     It topologically sorts the graph and removes unused nodes.
     This is needed because the pattern matcher does not guarantee producing
     a topologically sorted graph, and there may be unused nodes left around.

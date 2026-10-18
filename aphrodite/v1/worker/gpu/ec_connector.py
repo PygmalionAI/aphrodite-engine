@@ -27,10 +27,7 @@ class ECConnector:
     def maybe_get_output(self, scheduler_output: "SchedulerOutput") -> Generator[ECConnectorOutput | None, None, None]:
         yield None
 
-    def no_forward(
-        self,
-        scheduler_output: "SchedulerOutput",
-    ) -> ModelRunnerOutput:
+    def no_forward(self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
         return EMPTY_MODEL_RUNNER_OUTPUT
 
 
@@ -58,6 +55,9 @@ class ActiveECConnector(ECConnector):
         assert scheduler_output.ec_connector_metadata is not None
         ec_connector.bind_connector_metadata(scheduler_output.ec_connector_metadata)
 
+        if ec_connector.is_producer:
+            ec_connector.start_save_caches(encoder_cache=self.encoder_cache)
+
         if ec_connector.is_consumer:
             ec_connector.start_load_caches(self.encoder_cache)
 
@@ -71,13 +71,11 @@ class ActiveECConnector(ECConnector):
             output.finished_sending, output.finished_recving = ec_connector.get_finished(
                 scheduler_output.finished_req_ids
             )
+            output.ec_connector_stats = ec_connector.get_ec_connector_stats()
             output.ec_connector_worker_meta = ec_connector.build_connector_worker_meta()
             ec_connector.clear_connector_metadata()
 
-    def no_forward(
-        self,
-        scheduler_output: "SchedulerOutput",
-    ) -> ModelRunnerOutput:
+    def no_forward(self, scheduler_output: "SchedulerOutput") -> ModelRunnerOutput:
         # EC send/recv even if no work to do.
         with self.maybe_get_output(scheduler_output) as ec_connector_output:
             pass
@@ -88,10 +86,7 @@ class ActiveECConnector(ECConnector):
 NO_OP_EC_CONNECTOR = ECConnector()
 
 
-def get_ec_connector(
-    aphrodite_config: AphroditeConfig,
-    encoder_cache: "EncoderCache | None",
-) -> ECConnector:
+def get_ec_connector(aphrodite_config: AphroditeConfig, encoder_cache: "EncoderCache | None") -> ECConnector:
     if not has_ec_transfer() or aphrodite_config.model_config.is_encoder_decoder or encoder_cache is None:
         return NO_OP_EC_CONNECTOR
 

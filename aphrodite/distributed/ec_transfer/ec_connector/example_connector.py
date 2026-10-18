@@ -17,6 +17,7 @@ from aphrodite.distributed.ec_transfer.ec_connector.utils import (
     collect_ec_item_metadata,
 )
 from aphrodite.logger import init_logger
+from aphrodite.utils.gpu_sync_debug import gpu_sync_allowed
 from aphrodite.v1.core.sched.output import SchedulerOutput
 
 if TYPE_CHECKING:
@@ -64,8 +65,7 @@ class ECExampleConnector(ECConnectorBase):
             raise ValueError("ec_transfer_config must be set for ECConnectorBase")
 
     def start_load_caches(self, encoder_cache, **kwargs) -> None:
-        """
-        Start loading the cache from the connector into Aphrodite's encoder cache.
+        """Start loading the cache from the connector into Aphrodite's encoder cache.
 
         This method loads the encoder cache based on metadata provided by the scheduler.
         It is called before `_gather_mm_embeddings` for the EC Connector. For EC,
@@ -75,6 +75,7 @@ class ECExampleConnector(ECConnectorBase):
             encoder_cache (dict[str, torch.Tensor]): A dictionary mapping multimodal
                 data hashes (`mm_hash`) to encoder cache tensors.
             kwargs (dict): Additional keyword arguments for the connector.
+
         """
         from aphrodite.platforms import current_platform
 
@@ -85,18 +86,23 @@ class ECExampleConnector(ECConnectorBase):
         if metadata is None:
             logger.warning("In connector.start_load_caches, but the connector metadata is None")
             return
+        # A bare "cuda" makes safetensors load onto cuda:0. Pin the load to the
+        # selected device so tensor-parallel workers load the cache locally.
+        device = current_platform.device_type
+        if current_platform.is_cuda_alike():
+            device = f"{device}:{current_platform.current_device()}"
         # Load the EC for each mm data
         for mm_data in metadata.mm_datas:
             if mm_data.mm_hash in encoder_cache:
                 continue
             filename = self._generate_filename_debug(mm_data.mm_hash)
-            ec_cache = safetensors.torch.load_file(filename, device=current_platform.device_type)["ec_cache"]
+            with gpu_sync_allowed():
+                ec_cache = safetensors.torch.load_file(filename, device=device)["ec_cache"]
             encoder_cache[mm_data.mm_hash] = ec_cache
             logger.debug("Success load encoder cache for hash %s", mm_data.mm_hash)
 
     def save_caches(self, encoder_cache, mm_hash, **kwargs) -> None:
-        """
-        Save the encoder cache to the connector.
+        """Save the encoder cache to the connector.
 
         This method saves the encoder cache from the worker's local storage
         to shared storage or another external connector.
@@ -106,13 +112,15 @@ class ECExampleConnector(ECConnectorBase):
                 data hashes (`mm_hash`) to encoder cache tensors.
             mm_hash (str): The hash of the multimodal data whose cache is being saved.
             kwargs (dict): Additional keyword arguments for the connector.
+
         """
         # Return if it is PD Instance
         if not self.is_producer:
             return
         filename = self._generate_filename_debug(mm_hash)
         ec_cache = encoder_cache[mm_hash]
-        tensors = {"ec_cache": ec_cache.detach().cpu()}
+        with gpu_sync_allowed():
+            tensors = {"ec_cache": ec_cache.detach().cpu()}
         safetensors.torch.save_file(tensors, filename)
         logger.debug("Save cache successful for mm_hash %s", mm_hash)
 
@@ -120,14 +128,14 @@ class ECExampleConnector(ECConnectorBase):
         self,
         identifier: str,
     ) -> bool:
-        """
-        Check if cache exist externally for the media
+        """Check if cache exist externally for the media.
 
         Args:
             identifier (str): the identifier of the media.
 
         Returns:
             Bool indicate that media exists in cache or not
+
         """
         return self._found_match_for_mm_data(identifier)
 
@@ -136,9 +144,7 @@ class ECExampleConnector(ECConnectorBase):
         request: "Request",
         index: int,
     ) -> None:
-        """
-        Update ECConnector state after encoder cache allocation.
-        """
+        """Update ECConnector state after encoder cache allocation."""
         mm_hash = request.mm_features[index].identifier
         # Only load cache if it is consumer and cache exists
         if not self.is_consumer or not self.has_cache_item(mm_hash):
@@ -190,7 +196,7 @@ class ECExampleConnector(ECConnectorBase):
 
     def _found_match_for_mm_data(self, mm_hash) -> bool:
         """Check if the cache is hit for the request."""
-        filename = self._generate_filename_debug(mm_hash)
+        filename = self._generate_filename_debug(mm_hash, create_folder=False)
         return os.path.exists(filename)
 
     def _generate_foldername_debug(
@@ -198,8 +204,7 @@ class ECExampleConnector(ECConnectorBase):
         mm_hash: str,
         create_folder: bool = True,  # <- now defaults to True
     ) -> str:
-        """
-        Return the folder in which the cache for this mm_hash lives.
+        """Return the folder in which the cache for this mm_hash lives.
         If `create_folder` is True (default) the directory is created
         recursively the first time it is needed.
         """
@@ -208,12 +213,13 @@ class ECExampleConnector(ECConnectorBase):
             os.makedirs(foldername, exist_ok=True)
         return foldername
 
-    def _generate_filename_debug(self, mm_hash: str) -> str:
+    def _generate_filename_debug(
+        self,
+        mm_hash: str,
+        create_folder: bool = True,
+    ) -> str:
+        """Return the full path of the safetensors file for this mm_hash.
+        If `create_folder` is True (default) the parent directory is created.
         """
-        Return the full path of the safetensors file for this mm_hash.
-        Ensures the parent directory exists because
-        `_generate_foldername_debug` is called with its default
-        (`create_folder=True`).
-        """
-        foldername = self._generate_foldername_debug(mm_hash)  # <- folder auto-created
+        foldername = self._generate_foldername_debug(mm_hash, create_folder)
         return os.path.join(foldername, "encoder_cache.safetensors")

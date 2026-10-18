@@ -25,8 +25,9 @@ class SamplingMetadata:
     # Alphabet sampling
     top_p: torch.Tensor | None
     top_k: torch.Tensor | None
-    # min_p is done in the logits processor
-    # min_p: Optional[torch.Tensor]
+    # The old runner owns min-p through MinPLogitsProcessor; V2 can supply it
+    # directly to the shared sampling operations.
+    min_p: torch.Tensor | None = None
     top_a: torch.Tensor | None = None
 
     # DRY

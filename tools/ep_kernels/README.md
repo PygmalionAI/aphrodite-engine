@@ -4,18 +4,22 @@ Large-scale cluster-level expert parallel, as described in the [DeepSeek-V3 Tech
 
 Here we break down the requirements in 2 steps:
 
-1. Build and install the Python libraries (both [pplx-kernels](https://github.com/ppl-ai/pplx-kernels) and [DeepEP](https://github.com/deepseek-ai/DeepEP)), including necessary dependencies like NVSHMEM. This step does not require any privileged access. Any user can do this.
+1. Build and install the [DeepEP](https://github.com/deepseek-ai/DeepEP) Python library, including necessary dependencies like NVSHMEM. This step does not require any privileged access. Any user can do this.
 2. Configure NVIDIA driver to enable IBGDA. This step requires root access, and must be done on the host machine.
 
 2 is necessary for multi-node deployment.
 
-All scripts accept a positional argument as workspace path for staging the build, defaulting to `$(pwd)/ep_kernels_workspace`.
+The Python library installer accepts `--workspace <dir>` for staging the build, defaulting to `$(pwd)/ep_kernels_workspace`.
 
-## NCCL version requirement (CUDA 13+)
+## NCCL version requirement for DeepEPv2
 
-DeepEPv2 uses the NCCL GIN backend, which requires NCCL >= 2.30.4 at both
-compile time and runtime. PyTorch 2.11 pins `nvidia-nccl-cu13==2.28.9`, so
-you need to override it.
+DeepEPv2 (`--all2all-backend deepep_v2`) uses the NCCL GIN (GPU-Initiated
+Networking) backend, which requires NCCL >= 2.30.4 both when DeepEP is built
+and at runtime. If PyTorch pins an older NCCL release, a plain `pip install`
+or `uv pip install` of Aphrodite is not enough.
+
+Upgrade NCCL before running `install_python_libraries.sh`. Use
+`nvidia-nccl-cu12` on CUDA 12.
 
 **With uv** (recommended):
 
@@ -25,7 +29,10 @@ export UV_OVERRIDE=/tmp/nccl-override.txt
 uv pip install aphrodite-engine
 ```
 
-**With pip**:
+Keep `UV_OVERRIDE` set for later installs into the same environment. Without
+it, any `uv pip install` that resolves PyTorch again restores the pinned NCCL.
+
+**With pip**, or to fix an existing environment:
 
 ```bash
 pip install aphrodite-engine
@@ -33,6 +40,14 @@ pip install "nvidia-nccl-cu13>=2.30.4" --no-deps
 ```
 
 The override must happen before building DeepEP and remain in place at runtime.
+`install_python_libraries.sh` warns when the installed NCCL is too old. If
+DeepEP was built against an older NCCL, upgrade NCCL and run the script again.
+When NCCL is too old at runtime, Aphrodite logs the reason at startup and
+`deepep_v2` fails with the same message. You can check with:
+
+```bash
+python -c "from aphrodite.utils.import_utils import deep_ep_v2_unavailable_reason; print(deep_ep_v2_unavailable_reason() or 'deepep_v2 is available')"
+```
 
 ## Usage
 

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import torch
-from aphrodite.quantization.utils.fp8_utils import (
+
+from aphrodite.model_executor.layers.quantization.utils.fp8_utils import (
     apply_w8a8_block_fp8_linear,
 )
-from aphrodite.quantization.utils.w8a8_utils import (
+from aphrodite.model_executor.layers.quantization.utils.w8a8_utils import (
     CUTLASS_BLOCK_FP8_SUPPORTED,
 )
-
 from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import triton as aphrodite_triton
 

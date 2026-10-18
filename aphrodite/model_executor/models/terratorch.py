@@ -15,7 +15,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Wrapper around `Terratorch` models"""
+"""Wrapper around `Terratorch` models."""
 
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
@@ -33,7 +33,7 @@ from terratorch.aphrodite import (
 from transformers import BatchFeature
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import ModalityData, MultiModalDataDict, MultiModalInput, mm_input
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.pooler import IdentityPooler
@@ -151,7 +151,7 @@ class TerratorchInputBuilder(BaseDummyInputsBuilder[TerratorchProcessingInfo]):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
         # Dummy data is generated based on the 'input' section
         # defined in the HF configuration file
@@ -198,7 +198,7 @@ class TerratorchMultiModalProcessor(BaseMultiModalProcessor[TerratorchProcessing
         hf_processor_mm_kwargs = inputs.hf_processor_mm_kwargs
 
         with timing_ctx.record("apply_hf_processor"):
-            _, passthrough_data = self._get_hf_mm_data(mm_items)
+            passthrough_data = self._get_hf_mm_inputs(mm_items, hf_processor_mm_kwargs).passthrough_data
             mm_processed_data = BatchFeature(
                 {k: torch.as_tensor(v).unsqueeze(0) for k, v in passthrough_data.items()},
                 tensor_type="pt",

@@ -23,14 +23,16 @@ from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
     kFp8Static128BlockSym,
     kFp8StaticChannelSym,
     kFp8StaticTensorSym,
+    kInt4Static32,
     kInt8StaticChannelSym,
     kMxfp4Dynamic,
     kMxfp4Static,
-    kMxfp6E2m3Dynamic,
-    kMxfp6E2m3Static,
-    kMxfp6E3m2Dynamic,
-    kMxfp6E3m2Static,
+    kMxfp6E2M3Dynamic,
+    kMxfp6E2M3Static,
+    kMxfp6E3M2Dynamic,
+    kMxfp6E3M2Static,
     kMxfp8Dynamic,
+    kNvfp4DynamicToken,
     kNvfp4Static,
 )
 
@@ -44,11 +46,14 @@ QUANT_KEY_NAMES: dict[str, QuantKey] = {
     "fp8_per_block_dynamic": kFp8Dynamic128Sym,
     "mxfp8": kMxfp8Dynamic,
     "mxfp4": kMxfp4Dynamic,
-    "mxfp6_e2m3": kMxfp6E2m3Static,
-    "mxfp6_e2m3_dynamic": kMxfp6E2m3Dynamic,
-    "mxfp6_e3m2": kMxfp6E3m2Static,
-    "mxfp6_e3m2_dynamic": kMxfp6E3m2Dynamic,
+    "mxfp6_e2m3": kMxfp6E2M3Static,
+    "mxfp6_e2m3_dynamic": kMxfp6E2M3Dynamic,
+    "mxfp6_e3m2": kMxfp6E3M2Static,
+    "mxfp6_e3m2_dynamic": kMxfp6E3M2Dynamic,
+    "nvfp4_per_token": kNvfp4DynamicToken,
     "int8_per_channel_static": kInt8StaticChannelSym,
+    # Load-time MXFP4-to-int4 for Kimi-K3 on gfx942.
+    "int4_per_group_32": kInt4Static32,
 }
 
 
@@ -152,7 +157,8 @@ class QuantizationConfigArgs:
     """
 
     overrides: list[QuantOverride] = Field(default_factory=list)
-    """Ordered module precision overrides. Later matching rules win."""
+    """Ordered module precision overrides. Later matching rules win, including
+    over the defaults supplied by an online shorthand such as ``mxfp6``."""
 
     if TYPE_CHECKING:
 
@@ -238,8 +244,8 @@ _ONLINE_SHORTHANDS: dict[str, QuantizationConfigArgs] = {
         moe=QuantSpec(weight=kMxfp8Dynamic),
     ),
     "mxfp6": QuantizationConfigArgs(
-        linear=QuantSpec(weight=kMxfp6E2m3Static, activation=kMxfp8Dynamic),
-        moe=QuantSpec(weight=kMxfp6E2m3Static, activation=kMxfp8Dynamic),
+        linear=QuantSpec(weight=kMxfp6E2M3Static, activation=kMxfp8Dynamic),
+        moe=QuantSpec(weight=kMxfp6E2M3Static, activation=kMxfp8Dynamic),
         overrides=[
             QuantOverride(
                 pattern=r"re:(^|.*\.)(gate|router|shared_expert_gate|lm_head)$",

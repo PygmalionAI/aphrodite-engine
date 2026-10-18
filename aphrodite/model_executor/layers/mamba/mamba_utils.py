@@ -124,9 +124,18 @@ class MambaStateDtypeCalculator:
         cls,
         model_dtype: ModelDType | torch.dtype,
         mamba_cache_dtype: MambaDType,
+        mamba_ssm_cache_dtype: MambaDType = "auto",
     ) -> tuple[torch.dtype, torch.dtype]:
-        state_dtype = get_kv_cache_torch_dtype(mamba_cache_dtype, model_dtype)
-        return (state_dtype, torch.float32)
+        conv_state_dtype = get_kv_cache_torch_dtype(mamba_cache_dtype, model_dtype)
+        if mamba_ssm_cache_dtype == "auto":
+            recurrent_state_dtype = torch.float32
+        elif mamba_ssm_cache_dtype in ("float32", "bfloat16"):
+            recurrent_state_dtype = STR_DTYPE_TO_TORCH_DTYPE[mamba_ssm_cache_dtype]
+        else:
+            raise ValueError(
+                f"KDA recurrent state supports only auto, float32, and bfloat16; got {mamba_ssm_cache_dtype}"
+            )
+        return (conv_state_dtype, recurrent_state_dtype)
 
     @classmethod
     def append_kda_recoverssm_record(
@@ -200,22 +209,30 @@ class MambaStateShapeCalculator:
     @classmethod
     def append_replayssm_ring(
         cls,
-        base_shapes: tuple[tuple[int, ...], ...],
+        base_shapes: tuple[tuple[int, int], tuple[int, int, int]],
         n_groups: int,
         tp_world_size: int,
         logical_window: int,
         backend: MambaBackendEnum,
-    ) -> tuple[tuple[int, ...], ...]:
+        num_speculative_tokens: int = 0,
+    ) -> tuple[
+        tuple[int, int],
+        tuple[int, int, int],
+        tuple[int, int, int],
+        tuple[int, int],
+        tuple[int, int, int],
+    ]:
         """Append the physical ReplaySSM ring shapes.
 
         ``base_shapes[1]`` is ``(nheads // tp, head_dim, state_size)``;
-        B_cache uses the un-extended ``n_groups``.
+        B_cache extends ``n_groups`` for head shards as in ``mamba2_state_shape``.
         """
         ring_buffer_len = logical_window
         if backend == MambaBackendEnum.FLASHINFER:
-            # FlashInfer keeps the live window and appended token together.
-            ring_buffer_len += 1
+            # FlashInfer keeps the live window and current verify window together.
+            ring_buffer_len += 1 + num_speculative_tokens
         local_nheads, head_dim, state_size = base_shapes[1]
+        n_groups = n_groups + cls.extra_groups_for_head_shards(n_groups, tp_world_size)
         local_ngroups = divide(n_groups, tp_world_size)
         return (
             *base_shapes,
@@ -240,7 +257,6 @@ class MambaStateShapeCalculator:
     def extra_groups_for_head_shards(cls, ngroups: int, tp_size: int):
         """Compute the increase in group numbers to account for
         replication in order to accompany the head shards."""
-
         # in the case ngoups % tp_size == 0, this will be zero
         if ngroups % tp_size == 0:
             return 0
@@ -320,13 +336,13 @@ class MambaStateShapeCalculator:
 
 @dataclass
 class MambaCopySpec:
-    """
-    Data class specifying the memory-copy parameters for Mamba states used for
+    """Data class specifying the memory-copy parameters for Mamba states used for
     prefix caching in align mode.
 
     Attributes:
         start_addr (int): Starting address for the memory copy operation.
         num_elements (int): Number of elements to copy from the starting address.
+
     """
 
     start_addr: int

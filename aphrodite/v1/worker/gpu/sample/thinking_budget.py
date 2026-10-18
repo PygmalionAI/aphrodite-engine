@@ -9,6 +9,7 @@ from aphrodite.sampling_params import SamplingParams
 from aphrodite.triton_utils import tl, triton
 from aphrodite.utils.torch_utils import async_tensor_h2d
 from aphrodite.v1.worker.gpu.buffer_utils import UvaBackedTensor
+from aphrodite.v1.worker.gpu.sample.logits_processor import LogitsContext
 from aphrodite.v1.worker.gpu.states import RequestState
 
 if TYPE_CHECKING:
@@ -52,11 +53,12 @@ class ThinkingBudgetState:
         self.natural_reasoning_end_token_ids = torch.tensor(natural_end_ids, dtype=torch.int32, device=self.device)
         self.reasoning_end_token_ids = torch.tensor(end_ids, dtype=torch.int32, device=self.device)
 
-    def add_request(self, req_idx: int, sampling_params: SamplingParams) -> None:
+    def add_request(self, req_idx: int, sampling_params: SamplingParams) -> bool:
         if not self.enabled:
-            return
+            return False
         budget = sampling_params.thinking_token_budget
-        self.use_thinking_budget[req_idx] = budget is not None
+        use_thinking_budget = budget is not None
+        self.use_thinking_budget[req_idx] = use_thinking_budget
         if budget is None:
             budget = -1
         else:
@@ -65,6 +67,7 @@ class ThinkingBudgetState:
         if self.thinking_token_budget.np[req_idx] != budget:
             self.thinking_token_budget.np[req_idx] = budget
             self._budget_dirty = True
+        return use_thinking_budget
 
     def apply_staged_writes(self) -> None:
         if not self.enabled:
@@ -79,27 +82,20 @@ class ThinkingBudgetState:
             self.thinking_token_budget.copy_to_uva()
             self._budget_dirty = False
 
-    def apply(
-        self,
-        logits: torch.Tensor,
-        expanded_idx_mapping: torch.Tensor,
-        idx_mapping: torch.Tensor,
-        idx_mapping_np: np.ndarray,
-        input_ids: torch.Tensor,
-        expanded_local_pos: torch.Tensor,
-    ) -> None:
+    def apply(self, logits: torch.Tensor, ctx: LogitsContext) -> None:
+        idx_mapping_np = ctx.idx_mapping_np
         if not self.enabled or not np.any(self.use_thinking_budget[idx_mapping_np]):
             return
 
         apply_thinking_budget(
             logits,
-            idx_mapping,
-            expanded_idx_mapping,
+            ctx.idx_mapping,
+            ctx.expanded_idx_mapping,
             self.thinking_token_budget.gpu,
             self.req_states.all_token_ids.gpu,
             self.req_states.total_len.gpu,
-            input_ids,
-            expanded_local_pos,
+            ctx.input_ids,
+            ctx.expanded_local_pos,
             self.cached_last_start,
             self.cached_last_end,
             self.cached_scan_pos,

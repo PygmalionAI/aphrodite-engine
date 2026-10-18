@@ -42,7 +42,7 @@ The batch running tool is designed to be used from the command line.
 You can run the batch with the following command, which will write its results to a file called `results.jsonl`
 
 ```
-python -m aphrodite.endpoints.openai.run_batch -i batched_example.jsonl -o results.jsonl --model NousResearch/Meta-Llama-3.1-8B-Instruct
+python -m aphrodite.entrypoints.openai.run_batch -i batched_example.jsonl -o results.jsonl --model NousResearch/Meta-Llama-3.1-8B-Instruct
 ```
 
 ### Step 3: Check your results
@@ -62,7 +62,7 @@ The batch runner supports remote input and output urls that are accessible via h
 For example, to run against our example input file located at `https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/rc_054/examples/openai_api/batched_example.jsonl`, you can run
 
 ```
-python -m aphrodite.endpoints.openai.run_batch -i https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/rc_054/examples/openai_api/batched_example.jsonl -o results.jsonl --model NousResearch/Meta-Llama-3.1-8B-Instruct
+python -m aphrodite.entrypoints.openai.run_batch -i https://raw.githubusercontent.com/PygmalionAI/aphrodite-engine/rc_054/examples/openai_api/batched_example.jsonl -o results.jsonl --model NousResearch/Meta-Llama-3.1-8B-Instruct
 ```
 
 ## Example 3: Integrating with AWS S3
@@ -148,7 +148,7 @@ output_url='https://s3.us-west-2.amazonaws.com/MY_BUCKET/MY_OUTPUT_FILE.jsonl?AW
 You can now run the batch runner, using the urls generated in the previous section.
 
 ```
-python -m aphrodite.endpoints.openai.run_batch \
+python -m aphrodite.entrypoints.openai.run_batch \
     -i "https://s3.us-west-2.amazonaws.com/MY_BUCKET/MY_INPUT_FILE.jsonl?AWSAccessKeyId=ABCDEFGHIJKLMNOPQRST&Signature=abcdefghijklmnopqrstuvwxyz12345&Expires=1715800091" \
     -o "https://s3.us-west-2.amazonaws.com/MY_BUCKET/MY_OUTPUT_FILE.jsonl?AWSAccessKeyId=ABCDEFGHIJKLMNOPQRST&Signature=abcdefghijklmnopqrstuvwxyz12345&Expires=1715800091" \
     --model --model NousResearch/Meta-Llama-3.1-8B-Instruct

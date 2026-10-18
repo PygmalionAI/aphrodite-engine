@@ -14,12 +14,16 @@ from mistral_common.tokens.tokenizers.tekken import SpecialTokenPolicy
 
 from aphrodite import LLM, SamplingParams
 from aphrodite.assets.audio import AudioAsset
+from aphrodite.config import CUDAGraphMode
 from aphrodite.engine.arg_utils import AsyncEngineArgs
+from aphrodite.engine.protocol import StreamingInput
+from aphrodite.platforms import current_platform
+from aphrodite.renderers.inputs.preprocess import parse_model_prompt
 from aphrodite.utils.math_utils import cdiv
 from aphrodite.v1.engine.async_llm import AsyncLLM
 from aphrodite.v1.kv_cache_interface import SlidingWindowSpec
 
-from ....utils import ROCM_ENGINE_KWARGS
+from ....utils import ROCM_ENGINE_KWARGS, create_new_process_for_each_test
 
 MODEL_NAME = "mistralai/Voxtral-Mini-4B-Realtime-2602"
 AUDIO_LAYER_NAME = "whisper_encoder.whisper_encoder.layers.0.layers.self_attn.attn"
@@ -102,7 +106,8 @@ def tokenizer() -> MistralTokenizer:
 
 
 @pytest_asyncio.fixture
-async def async_engine():
+async def async_engine(request):
+    engine_config = {**ENGINE_CONFIG, **getattr(request, "param", {})}
     gpu_memory_utilization = ENGINE_CONFIG.get("gpu_memory_utilization", 0.9)
     from aphrodite.platforms import current_platform
 
@@ -111,7 +116,7 @@ async def async_engine():
 
         wait_for_memory_to_settle(threshold_ratio=1.0 - gpu_memory_utilization)
 
-    engine_args = AsyncEngineArgs(**ENGINE_CONFIG)
+    engine_args = AsyncEngineArgs(**engine_config)
     llm = AsyncLLM.from_engine_args(engine_args)
     try:
         yield llm
@@ -130,6 +135,41 @@ async def async_engine():
         wait_for_memory_to_settle(threshold_ratio=1.0 - gpu_memory_utilization)
 
 
+def _build_inputs(
+    audio_assets: list[AudioAsset], tokenizer: MistralTokenizer
+) -> tuple[list[dict], list[SamplingParams]]:
+    audio_config = tokenizer.instruct_tokenizer.tokenizer.audio
+    inputs = []
+    sampling_params = []
+    for audio_asset in audio_assets:
+        audio = Audio.from_file(audio_asset.get_local_path(), strict=False)
+        req = TranscriptionRequest(
+            audio=audio.to_base64(audio.format),
+            streaming=StreamingMode.OFFLINE,
+            language=None,
+        )
+        tokenized = tokenizer.instruct_tokenizer.encode_transcription(req)
+        tokens = tokenized.tokens
+        audio_array = tokenized.audios[0].audio_array
+
+        num_samples = audio_array.shape[0]
+        max_tokens = audio_config.num_audio_tokens(num_samples) - len(tokens) - 1
+        sampling_params.append(SamplingParams(temperature=0.0, max_tokens=max_tokens))
+        inputs.append(
+            {
+                "multi_modal_data": {"audio": [(audio_array, None)]},
+                "prompt_token_ids": tokens,
+            }
+        )
+    return inputs, sampling_params
+
+
+def _assert_expected_text(outputs) -> None:
+    texts = _normalize([out.outputs[0].text for out in outputs])
+    for i, (got, expected) in enumerate(zip(texts, EXPECTED_TEXT)):
+        assert got == expected, f"Output mismatch at index {i}:\n  got:      {got!r}\n  expected: {expected!r}"
+
+
 def test_voxtral_realtime_forward(audio_assets, tokenizer, aphrodite_runner, monkeypatch):
     monkeypatch.setenv("APHRODITE_ENABLE_V1_MULTIPROCESSING", "0")
 
@@ -138,43 +178,35 @@ def test_voxtral_realtime_forward(audio_assets, tokenizer, aphrodite_runner, mon
 
     with aphrodite_runner(**aphrodite_kwargs) as aphrodite_model:
         assert_encoder_kv_cache_spec(aphrodite_model.llm)
-        audio_config = tokenizer.instruct_tokenizer.tokenizer.audio
+        inputs, sampling_params = _build_inputs(audio_assets, tokenizer)
 
-        def from_file(file_path: str):
-            audio = Audio.from_file(file_path, strict=False)
-            req = TranscriptionRequest(
-                audio=audio.to_base64(audio.format),
-                streaming=StreamingMode.OFFLINE,
-                language=None,
-            )
-            tokenized = tokenizer.instruct_tokenizer.encode_transcription(req)
+        outputs = aphrodite_model.llm.generate(inputs, sampling_params=sampling_params)
+        _assert_expected_text(outputs)
 
-            return (tokenized.tokens, tokenized.audios[0].audio_array)
 
-        tokenized_list = [from_file(audio_asset.get_local_path()) for audio_asset in audio_assets]
+@pytest.mark.skipif(not current_platform.is_cuda(), reason="Full cudagraphs require CUDA")
+@pytest.mark.parametrize(
+    "cudagraph_mode",
+    [CUDAGraphMode.FULL_DECODE_ONLY, CUDAGraphMode.FULL_AND_PIECEWISE],
+)
+@create_new_process_for_each_test(method="spawn")
+def test_voxtral_realtime_cudagraph(audio_assets, tokenizer, aphrodite_runner, monkeypatch, cudagraph_mode):
+    monkeypatch.setenv("APHRODITE_ENABLE_V1_MULTIPROCESSING", "0")
 
-        inputs = []
-        sampling_params = []
+    aphrodite_kwargs = {**ENGINE_CONFIG}
+    aphrodite_kwargs["model_name"] = aphrodite_kwargs.pop("model")
+    aphrodite_kwargs["enforce_eager"] = False
+    aphrodite_kwargs["compilation_config"] = {
+        "cudagraph_mode": cudagraph_mode,
+        # max_num_seqs is 4, so this is the only decode size worth capturing.
+        "cudagraph_capture_sizes": [4],
+    }
 
-        for tokens, audio_array in tokenized_list:
-            num_samples = audio_array.shape[0]
-            max_tokens = audio_config.num_audio_tokens(num_samples) - len(tokens) - 1
-            sampling_params.append(SamplingParams(temperature=0.0, max_tokens=max_tokens))
+    with aphrodite_runner(**aphrodite_kwargs) as aphrodite_model:
+        inputs, sampling_params = _build_inputs(audio_assets, tokenizer)
 
-            input_dict = {
-                "multi_modal_data": {"audio": [(audio_array, None)]},
-                "prompt_token_ids": tokens,
-            }
-            inputs.append(input_dict)
-
-        outputs = aphrodite_model.llm.generate(
-            inputs,
-            sampling_params=sampling_params,
-        )
-
-        texts = _normalize([out.outputs[0].text for out in outputs])
-        for i, (got, expected) in enumerate(zip(texts, EXPECTED_TEXT)):
-            assert got == expected, f"Output mismatch at index {i}:\n  got:      {got!r}\n  expected: {expected!r}"
+        outputs = aphrodite_model.llm.generate(inputs, sampling_params=sampling_params)
+        _assert_expected_text(outputs)
 
 
 @pytest.mark.asyncio
@@ -184,6 +216,12 @@ async def test_voxtral_realtime_generator(audio_assets, tokenizer, async_engine)
 
     sampling_params = SamplingParams(temperature=0.0, max_tokens=1)
     audio_config = tokenizer.instruct_tokenizer.audio_encoder.audio_config
+
+    async def input_stream(audio_buffer):
+        async for prompt in audio_buffer.get_input_stream():
+            parsed_prompt = parse_model_prompt(async_engine.model_config, prompt)
+            (engine_input,) = await async_engine.renderer.render_cmpl_async([parsed_prompt])
+            yield StreamingInput(prompt=engine_input)
 
     output_tokens_list = []
     for i, audio_asset in enumerate(audio_assets):
@@ -204,7 +242,7 @@ async def test_voxtral_realtime_generator(audio_assets, tokenizer, async_engine)
         request_id = f"session-{i}"
 
         async for resp in async_engine.generate(
-            prompt=buffer.get_input_stream(),
+            prompt=input_stream(buffer),
             sampling_params=sampling_params,
             request_id=request_id,
         ):
@@ -222,3 +260,74 @@ async def test_voxtral_realtime_generator(audio_assets, tokenizer, async_engine)
     )
     for i, (got, expected) in enumerate(zip(texts, EXPECTED_TEXT)):
         assert got == expected, f"Output mismatch at index {i}:\n  got:      {got!r}\n  expected: {expected!r}"
+
+
+@pytest.mark.asyncio
+async def test_voxtral_realtime_buffer_stops_at_max_model_len(tokenizer):
+    from aphrodite.model_executor.models.voxtral_realtime import VoxtralRealtimeBuffer
+
+    audio_config = tokenizer.instruct_tokenizer.audio_encoder.audio_config
+    audio = Audio.from_file(AudioAsset("winning_call").get_local_path(), strict=False)
+    req = TranscriptionRequest(
+        streaming=StreamingMode.OFFLINE,
+        audio=audio.to_base64(audio.format),
+        language=None,
+    )
+    audio_enc = tokenizer.encode_transcription(req)
+
+    max_model_len = 64
+    buffer = VoxtralRealtimeBuffer(audio_config, audio_enc.tokens, max_model_len=max_model_len)
+    await buffer.append_audio(audio_enc.audios[0].audio_array)
+    await buffer.append_audio(None)
+    # Unlimited feedback tokens so only the length cap can stop the stream.
+    await buffer.append_tokens([0] * max_model_len)
+
+    n_tokens = 0
+    async for prompt in buffer.get_input_stream():
+        n_tokens += len(prompt["prompt_token_ids"])
+
+    assert len(audio_enc.tokens) < n_tokens < max_model_len
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_engine", [{"max_model_len": 128}], indirect=True)
+async def test_voxtral_realtime_generator_max_model_len(audio_assets, tokenizer, async_engine):
+    # Lazy import to avoid CUDA-reinitialization error
+    from aphrodite.model_executor.models.voxtral_realtime import VoxtralRealtimeBuffer
+
+    max_model_len = async_engine.model_config.max_model_len
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=1)
+    audio_config = tokenizer.instruct_tokenizer.audio_encoder.audio_config
+
+    async def input_stream(audio_buffer):
+        async for prompt in audio_buffer.get_input_stream():
+            parsed_prompt = parse_model_prompt(async_engine.model_config, prompt)
+            (engine_input,) = await async_engine.renderer.render_cmpl_async([parsed_prompt])
+            yield StreamingInput(prompt=engine_input)
+
+    # winning_call is ~300 tokens long, well past max_model_len.
+    audio = Audio.from_file(audio_assets[1].get_local_path(), strict=False)
+    req = TranscriptionRequest(
+        streaming=StreamingMode.OFFLINE,
+        audio=audio.to_base64(audio.format),
+        language=None,
+    )
+    audio_enc = tokenizer.encode_transcription(req)
+    buffer = VoxtralRealtimeBuffer(audio_config, audio_enc.tokens, max_model_len=max_model_len)
+    await buffer.append_audio(audio_enc.audios[0].audio_array)
+    await buffer.append_audio(None)
+
+    output_tokens = []
+    async for resp in async_engine.generate(
+        prompt=input_stream(buffer),
+        sampling_params=sampling_params,
+        request_id="session-max-len",
+    ):
+        tokens = resp.outputs[0].token_ids[-1:]
+        output_tokens.extend(tokens)
+        await buffer.append_tokens(tokens)
+
+    assert resp.finished
+    assert 0 < len(output_tokens) < max_model_len
+    # The engine is still healthy after the session hit the cap.
+    assert not async_engine.errored

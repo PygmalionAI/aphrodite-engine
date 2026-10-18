@@ -3,13 +3,13 @@
 
 import torch.nn as nn
 
-from aphrodite.v1.worker.gpu.spec_decode.autoregressive.speculator import (
-    AutoRegressiveSpeculator,
-)
 from aphrodite.v1.worker.gpu.spec_decode.eagle.utils import load_eagle_model
+from aphrodite.v1.worker.gpu.spec_decode.target_dependent_ar.speculator import (
+    TargetDependentARSpeculator,
+)
 
 
-class EagleSpeculator(AutoRegressiveSpeculator):
+class EagleSpeculator(TargetDependentARSpeculator):
     def load_draft_model(
         self,
         target_model: nn.Module,

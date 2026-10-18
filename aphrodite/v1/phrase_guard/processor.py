@@ -42,13 +42,11 @@ class PhraseRetryProcessor(LogitsProcessor):
 
     @classmethod
     def validate_runtime(cls, config, tokenizer):
-        from transformers import TokenizersBackend
+        from aphrodite.v1.engine.detokenizer import uses_fast_detokenizer
 
-        from aphrodite.v1.engine import detokenizer
-
-        if not detokenizer.USE_FAST_DETOKENIZER or not isinstance(tokenizer, TokenizersBackend):
+        if not uses_fast_detokenizer(tokenizer):
             raise ValueError("Experimental banned_strings requires a fast Hugging Face tokenizer")
-        if config.model_config.return_sampling_mask or config.model_config.enable_return_routed_experts:
+        if config.model_config.return_sampling_mask or config.aux_output_config.enabled:
             raise ValueError("Experimental banned_strings does not support sampling masks or routed experts")
         if not config.use_v2_model_runner and not any(
             p is cls or p == f"{cls.__module__}:{cls.__name__}" for p in config.model_config.logits_processors or []

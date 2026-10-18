@@ -34,8 +34,7 @@ REQUIRED_BEAM_SEARCH_TERMS = [
 
 
 def check_output_matches_terms(content: str, term_groups: list[list[str]]) -> bool:
-    """
-    Check if content matches all required term groups.
+    """Check if content matches all required term groups.
     Each term group requires at least one of its terms to be present.
     All term groups must be satisfied.
     """
@@ -85,13 +84,11 @@ def server():
         *ROCM_EXTRA_ARGS,
     ]
 
-    # ROCm: Increase timeouts to handle potential network delays and slower
-    # video processing when downloading multiple videos from external sources
+    # ROCm: Allow more time to download videos from external sources.
     env_overrides = {
         **(
             {
                 "APHRODITE_VIDEO_FETCH_TIMEOUT": "120",
-                "APHRODITE_ENGINE_ITERATION_TIMEOUT_S": "300",
             }
             if current_platform.is_rocm()
             else {}

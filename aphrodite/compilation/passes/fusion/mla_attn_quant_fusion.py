@@ -33,8 +33,7 @@ MLA_ATTN_OP = torch.ops.aphrodite.unified_mla_attention_with_output.default
 
 
 class MLAAttnFp8StaticQuantPattern(AphroditePatternReplacement[..., torch.Tensor]):
-    """
-    Fusion for MLA Attention+Fp8StaticQuant.
+    """Fusion for MLA Attention+Fp8StaticQuant.
 
     Matches the pattern: MLA attention -> static FP8 quant, and replaces
     it with MLA attention(output_scale=scale, output=fp8_buffer).
@@ -172,8 +171,7 @@ class MLAAttnFp8StaticQuantPattern(AphroditePatternReplacement[..., torch.Tensor
 
 
 class MLAAttnNvfp4QuantPattern(AphroditePatternReplacement[..., tuple[torch.Tensor, torch.Tensor]]):
-    """
-    Fusion for MLA Attention+Nvfp4Quant.
+    """Fusion for MLA Attention+Nvfp4Quant.
 
     Matches the pattern: MLA attention -> NVFP4 quant, and replaces
     it with MLA attention(output_scale=scale, output_block_scale=block_scale,
@@ -358,8 +356,7 @@ class MLAAttnNvfp4QuantPattern(AphroditePatternReplacement[..., tuple[torch.Tens
 
 
 class MLAAttnFp8GroupQuantPattern(AphroditePatternReplacement[..., tuple[torch.Tensor, torch.Tensor]]):
-    """
-    Fusion for MLA Attention+Fp8GroupQuant (per-group dynamic FP8).
+    """Fusion for MLA Attention+Fp8GroupQuant (per-group dynamic FP8).
 
     Matches the pattern: MLA attention -> per_token_group_fp8_quant, and
     replaces it with MLA attention(output_block_scale=group_scale_buffer).
@@ -564,8 +561,7 @@ class MLAAttnFp8GroupQuantPattern(AphroditePatternReplacement[..., tuple[torch.T
 
 
 class MLAAttnQuantFusionPass(AphroditeFusionPatternMatcherPass):
-    """
-    This pass fuses post-attention quantization onto MLA attention if supported.
+    """This pass fuses post-attention quantization onto MLA attention if supported.
 
     It uses the pattern matcher and matches each MLA layer manually, as strings
     cannot be wildcarded. This also lets us check support on attention layers

@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import regex as re
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -20,6 +19,7 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
 )
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import Tool, ToolParser
 
@@ -27,8 +27,7 @@ logger = init_logger(__name__)
 
 
 class FunctionGemmaToolParser(ToolParser):
-    """
-    Tool parser for Google's FunctionGemma model (google/functiongemma-270m-it).
+    """Tool parser for Google's FunctionGemma model (google/functiongemma-270m-it).
 
     Handles the FunctionGemma function call format:
     <start_function_call>call:func_name{param:<escape>value<escape>}<end_function_call>

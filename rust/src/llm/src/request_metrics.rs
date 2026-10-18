@@ -39,6 +39,15 @@ pub(crate) fn request_level_metrics_enabled() -> bool {
     })
 }
 
+/// Engine lifecycle timestamps used by frontend per-request response metrics.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RequestTimestamps {
+    pub queued_ts: f64,
+    pub scheduled_ts: f64,
+    pub first_token_ts: f64,
+    pub last_token_ts: f64,
+}
+
 /// Request-scoped metrics state tracked across streamed engine-core updates.
 ///
 /// This is the Rust-side counterpart of the Python frontend's request-lifecycle
@@ -66,8 +75,10 @@ pub(crate) struct RequestMetricsTracker {
     last_token_ts: f64,
     first_token_latency: f64,
     num_generation_tokens: u32,
+    num_preemptions: u64,
     latest_num_cached_tokens: u32,
     log_request_level: bool,
+    is_corrupted: bool,
 }
 
 /// Cached request metric handles for one model and engine index.
@@ -76,13 +87,13 @@ struct RequestMetricHandles {
     labels: EngineLabels,
 
     // Request-derived counters.
-    num_preemptions: U64Counter,
     prompt_tokens: U64Counter,
     prompt_tokens_local_compute: U64Counter,
     prompt_tokens_local_cache_hit: U64Counter,
     prompt_tokens_external_kv_transfer: U64Counter,
     prompt_tokens_cached: U64Counter,
     generation_tokens: U64Counter,
+    corrupted_requests: U64Counter,
 
     // Request lifecycle counters and histograms.
     request_success: Family<FinishedReasonLabels, U64Counter>,
@@ -95,11 +106,23 @@ struct RequestMetricHandles {
     time_to_first_token_seconds: HistogramMetric,
     inter_token_latency_seconds: HistogramMetric,
     e2e_request_latency_seconds: HistogramMetric,
+    request_decode_time_seconds: HistogramMetric,
+    request_time_per_output_token_seconds: HistogramMetric,
+
+    /// Present only when engines record stats.
+    events: Option<EventMetricHandles>,
+}
+
+/// Cached handles for request metrics derived from engine-core lifecycle
+/// events (`QUEUED`, `SCHEDULED`, `PREEMPTED`), which engines only emit when
+/// they record stats.
+#[derive(Clone)]
+struct EventMetricHandles {
+    num_preemptions: U64Counter,
+    request_num_preemptions: HistogramMetric,
     request_queue_time_seconds: HistogramMetric,
     request_prefill_time_seconds: HistogramMetric,
-    request_decode_time_seconds: HistogramMetric,
     request_inference_time_seconds: HistogramMetric,
-    request_time_per_output_token_seconds: HistogramMetric,
 }
 
 impl RequestMetricsTracker {
@@ -112,9 +135,14 @@ impl RequestMetricsTracker {
         prompt_len: u32,
         max_tokens_param: Option<u32>,
         n_param: u32,
+        engine_stats_enabled: bool,
     ) -> Self {
         Self {
-            handles: resolve_request_metric_handles(&model_name, engine_index),
+            handles: resolve_request_metric_handles(
+                &model_name,
+                engine_index,
+                engine_stats_enabled,
+            ),
             arrival_time,
             prompt_len,
             max_tokens_param,
@@ -126,8 +154,10 @@ impl RequestMetricsTracker {
             last_token_ts: 0.0,
             first_token_latency: 0.0,
             num_generation_tokens: 0,
+            num_preemptions: 0,
             latest_num_cached_tokens: 0,
             log_request_level: request_level_metrics_enabled(),
+            is_corrupted: false,
         }
     }
 
@@ -146,6 +176,7 @@ impl RequestMetricsTracker {
         }
         self.num_generation_tokens += output.new_token_ids.len() as u32;
         self.handles.generation_tokens.inc_by(output.new_token_ids.len() as u64);
+        self.is_corrupted |= output.num_nans_in_logits > 0;
 
         if let Some(events) = &output.events {
             self.observe_events(events);
@@ -161,9 +192,7 @@ impl RequestMetricsTracker {
                     self.record_prompt_tokens(prefill_stats);
                 }
                 self.first_token_latency = received_at - self.arrival_time;
-                self.handles
-                    .time_to_first_token_seconds
-                    .observe(self.first_token_latency);
+                self.handles.time_to_first_token_seconds.observe(self.first_token_latency);
                 self.first_token_ts = batch_timestamp;
                 self.is_prefilling = false;
             } else if self.last_token_ts > 0.0 {
@@ -185,10 +214,7 @@ impl RequestMetricsTracker {
         let prefill_kv_computed_tokens =
             self.prompt_len.saturating_sub(self.latest_num_cached_tokens);
         let e2e_latency_seconds = received_at - self.arrival_time;
-        let queue_time_seconds = diff_or_zero(self.scheduled_ts, self.queued_ts);
-        let prefill_time_seconds = diff_or_zero(self.first_token_ts, self.scheduled_ts);
         let decode_time_seconds = diff_or_zero(self.last_token_ts, self.first_token_ts);
-        let inference_time_seconds = diff_or_zero(self.last_token_ts, self.scheduled_ts);
         let time_per_output_token_seconds = if self.num_generation_tokens > 1 {
             diff_or_zero(self.last_token_ts, self.first_token_ts)
                 / (self.num_generation_tokens - 1) as f64
@@ -197,6 +223,10 @@ impl RequestMetricsTracker {
         };
 
         self.record_request_success(finish_reason);
+        if self.is_corrupted {
+            self.handles.corrupted_requests.inc();
+        }
+
         self.handles.request_prompt_tokens.observe(self.prompt_len as f64);
         self.handles
             .request_generation_tokens
@@ -205,39 +235,34 @@ impl RequestMetricsTracker {
             .request_max_num_generation_tokens
             .observe(self.num_generation_tokens as f64);
         if let Some(max_tokens_param) = self.max_tokens_param {
-            self.handles
-                .request_params_max_tokens
-                .observe(max_tokens_param as f64);
+            self.handles.request_params_max_tokens.observe(max_tokens_param as f64);
         }
         self.handles.request_params_n.observe(self.n_param as f64);
         self.handles
             .request_prefill_kv_computed_tokens
             .observe(prefill_kv_computed_tokens as f64);
-        self.handles
-            .e2e_request_latency_seconds
-            .observe(e2e_latency_seconds);
-        self.handles
-            .request_queue_time_seconds
-            .observe(queue_time_seconds);
-        self.handles
-            .request_prefill_time_seconds
-            .observe(prefill_time_seconds);
-        self.handles
-            .request_decode_time_seconds
-            .observe(decode_time_seconds);
-        self.handles
-            .request_inference_time_seconds
-            .observe(inference_time_seconds);
+        self.handles.e2e_request_latency_seconds.observe(e2e_latency_seconds);
+        self.handles.request_decode_time_seconds.observe(decode_time_seconds);
         self.handles
             .request_time_per_output_token_seconds
             .observe(time_per_output_token_seconds);
 
-        // Aphrodite-specific: emit a per-request completion log line. The
-        // aggregate periodic log in `log_stats` is suppressed while this is on.
+        if let Some(events) = &self.handles.events {
+            let queue_time_seconds = diff_or_zero(self.scheduled_ts, self.queued_ts);
+            let prefill_time_seconds = diff_or_zero(self.first_token_ts, self.scheduled_ts);
+            let inference_time_seconds = diff_or_zero(self.last_token_ts, self.scheduled_ts);
+
+            events.request_num_preemptions.observe(self.num_preemptions as f64);
+            events.request_queue_time_seconds.observe(queue_time_seconds);
+            events.request_prefill_time_seconds.observe(prefill_time_seconds);
+            events.request_inference_time_seconds.observe(inference_time_seconds);
+        }
+
+        // Per-request completion logs replace periodic aggregate logs when enabled.
         if self.log_request_level {
             self.log_finished_request(
                 e2e_latency_seconds,
-                prefill_time_seconds,
+                self.first_token_latency,
                 decode_time_seconds,
             );
         }
@@ -283,25 +308,27 @@ impl RequestMetricsTracker {
         );
     }
 
+    /// Engine lifecycle timestamps recorded so far.
+    pub(crate) fn timestamps(&self) -> RequestTimestamps {
+        RequestTimestamps {
+            queued_ts: self.queued_ts,
+            scheduled_ts: self.scheduled_ts,
+            first_token_ts: self.first_token_ts,
+            last_token_ts: self.last_token_ts,
+        }
+    }
+
     /// Record prompt token counters through cached metric handles.
     fn record_prompt_tokens(&self, prefill_stats: &PrefillStats) {
         let computed = prefill_stats.num_computed_tokens as u64;
         let local_cache_hit = prefill_stats.num_local_cached_tokens as u64;
         let external_kv_transfer = prefill_stats.num_external_cached_tokens as u64;
 
-        self.handles
-            .prompt_tokens
-            .inc_by(prefill_stats.num_prompt_tokens as u64);
+        self.handles.prompt_tokens.inc_by(prefill_stats.num_prompt_tokens as u64);
         self.handles.prompt_tokens_local_compute.inc_by(computed);
-        self.handles
-            .prompt_tokens_local_cache_hit
-            .inc_by(local_cache_hit);
-        self.handles
-            .prompt_tokens_external_kv_transfer
-            .inc_by(external_kv_transfer);
-        self.handles
-            .prompt_tokens_cached
-            .inc_by(prefill_stats.num_cached_tokens as u64);
+        self.handles.prompt_tokens_local_cache_hit.inc_by(local_cache_hit);
+        self.handles.prompt_tokens_external_kv_transfer.inc_by(external_kv_transfer);
+        self.handles.prompt_tokens_cached.inc_by(prefill_stats.num_cached_tokens as u64);
     }
 
     /// Record request event counters through cached metric handles.
@@ -317,7 +344,10 @@ impl RequestMetricsTracker {
                     }
                 }
                 EngineCoreEventType::Preempted => {
-                    self.handles.num_preemptions.inc();
+                    self.num_preemptions += 1;
+                    if let Some(events) = &self.handles.events {
+                        events.num_preemptions.inc();
+                    }
                 }
             }
         }
@@ -337,7 +367,11 @@ impl RequestMetricsTracker {
 }
 
 /// Resolve fixed request metric handles for one model and engine index.
-fn resolve_request_metric_handles(model_name: &str, engine: u32) -> RequestMetricHandles {
+fn resolve_request_metric_handles(
+    model_name: &str,
+    engine: u32,
+    engine_stats_enabled: bool,
+) -> RequestMetricHandles {
     let metrics = &METRICS.request;
     let labels = EngineLabels {
         model_name: model_name.to_string(),
@@ -345,7 +379,6 @@ fn resolve_request_metric_handles(model_name: &str, engine: u32) -> RequestMetri
     };
 
     RequestMetricHandles {
-        num_preemptions: metrics.num_preemptions.get_or_create_owned(&labels),
         prompt_tokens: metrics.prompt_tokens.get_or_create_owned(&labels),
         prompt_tokens_local_compute: metrics.prompt_tokens_by_source.get_or_create_owned(
             &prompt_token_source_labels(model_name, engine, PROMPT_TOKEN_SOURCE_LOCAL_COMPUTE),
@@ -362,6 +395,7 @@ fn resolve_request_metric_handles(model_name: &str, engine: u32) -> RequestMetri
         ),
         prompt_tokens_cached: metrics.prompt_tokens_cached.get_or_create_owned(&labels),
         generation_tokens: metrics.generation_tokens.get_or_create_owned(&labels),
+        corrupted_requests: metrics.corrupted_requests.get_or_create_owned(&labels),
         request_success: metrics.request_success.clone(),
         request_prompt_tokens: metrics.request_prompt_tokens.get_or_create_owned(&labels),
         request_generation_tokens: metrics.request_generation_tokens.get_or_create_owned(&labels),
@@ -382,19 +416,25 @@ fn resolve_request_metric_handles(model_name: &str, engine: u32) -> RequestMetri
         e2e_request_latency_seconds: metrics
             .e2e_request_latency_seconds
             .get_or_create_owned(&labels),
-        request_queue_time_seconds: metrics.request_queue_time_seconds.get_or_create_owned(&labels),
-        request_prefill_time_seconds: metrics
-            .request_prefill_time_seconds
-            .get_or_create_owned(&labels),
         request_decode_time_seconds: metrics
             .request_decode_time_seconds
-            .get_or_create_owned(&labels),
-        request_inference_time_seconds: metrics
-            .request_inference_time_seconds
             .get_or_create_owned(&labels),
         request_time_per_output_token_seconds: metrics
             .request_time_per_output_token_seconds
             .get_or_create_owned(&labels),
+        events: engine_stats_enabled.then(|| EventMetricHandles {
+            num_preemptions: metrics.num_preemptions.get_or_create_owned(&labels),
+            request_num_preemptions: metrics.request_num_preemptions.get_or_create_owned(&labels),
+            request_queue_time_seconds: metrics
+                .request_queue_time_seconds
+                .get_or_create_owned(&labels),
+            request_prefill_time_seconds: metrics
+                .request_prefill_time_seconds
+                .get_or_create_owned(&labels),
+            request_inference_time_seconds: metrics
+                .request_inference_time_seconds
+                .get_or_create_owned(&labels),
+        }),
         labels,
     }
 }
@@ -439,12 +479,12 @@ mod tests {
     use aphrodite_engine_core_client::protocol::output::{EngineCoreEvent, EngineCoreEventType};
     use aphrodite_engine_core_client::protocol::stats::PrefillStats;
 
-    use super::{diff_or_zero, RequestMetricsTracker};
+    use super::{RequestMetricsTracker, RequestTimestamps, diff_or_zero};
 
     #[test]
     fn tracker_updates_timing_state_across_prefill_decode_and_finish() {
         let mut tracker =
-            RequestMetricsTracker::new("model".to_string(), 2, 100.0, 64, Some(128), 1);
+            RequestMetricsTracker::new("model".to_string(), 2, 100.0, 64, Some(128), 1, true);
 
         tracker.observe_output(
             10.0,
@@ -463,14 +503,14 @@ mod tests {
                         timestamp: 9.0,
                     },
                 ]),
-                prefill_stats: Some(PrefillStats {
+                prefill_stats: Some(Box::new(PrefillStats {
                     num_prompt_tokens: 64,
                     num_computed_tokens: 60,
                     num_cached_tokens: 4,
                     num_local_cached_tokens: 4,
                     num_external_cached_tokens: 0,
                     ..Default::default()
-                }),
+                })),
                 ..Default::default()
             },
         );
@@ -496,6 +536,15 @@ mod tests {
         assert_eq!(tracker.scheduled_ts, 9.0);
         assert_eq!(tracker.first_token_ts, 10.0);
         assert_eq!(tracker.last_token_ts, 11.5);
+        assert_eq!(
+            tracker.timestamps(),
+            RequestTimestamps {
+                queued_ts: 8.0,
+                scheduled_ts: 9.0,
+                first_token_ts: 10.0,
+                last_token_ts: 11.5,
+            }
+        );
         assert!((tracker.first_token_latency - 0.2).abs() < 1e-9);
         assert_eq!(
             diff_or_zero(tracker.last_token_ts, tracker.first_token_ts),

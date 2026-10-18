@@ -2,15 +2,15 @@
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 use anyhow::{Context, Result, bail};
+use aphrodite_engine_core_client::EngineId;
+use aphrodite_engine_core_client::mock_engine::{
+    MockEngineConfig, MockEngineSockets, connect_to_frontend,
+};
 use clap::Parser;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
-use aphrodite_engine_core_client::EngineId;
-use aphrodite_engine_core_client::mock_engine::{
-    MockEngineConfig, MockEngineSockets, connect_to_frontend,
-};
 
 pub mod engine;
 pub mod io;

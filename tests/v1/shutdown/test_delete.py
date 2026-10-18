@@ -5,6 +5,7 @@
 import pytest
 
 from aphrodite import LLM, SamplingParams
+from aphrodite.config import KernelConfig
 from aphrodite.engine.arg_utils import AsyncEngineArgs
 from aphrodite.platforms import current_platform
 from aphrodite.sampling_params import RequestOutputKind
@@ -32,11 +33,17 @@ async def test_async_llm_delete(model: str, tensor_parallel_size: int, send_one_
       model: model under test
       tensor_parallel_size: degree of tensor parallelism
       send_one_request: send one request to engine before deleting
+
     """
     if current_platform.device_count() < tensor_parallel_size:
         pytest.skip(reason="Not enough CUDA devices")
 
-    engine_args = AsyncEngineArgs(model=model, enforce_eager=True, tensor_parallel_size=tensor_parallel_size)
+    engine_args = AsyncEngineArgs(
+        model=model,
+        enforce_eager=True,
+        tensor_parallel_size=tensor_parallel_size,
+        kernel_config=KernelConfig(enable_jit_warmup=False),
+    )
 
     # Instantiate AsyncLLM; make request to complete any deferred
     # initialization; then delete instance
@@ -77,6 +84,7 @@ def test_llm_delete(
       tensor_parallel_size: degree of tensor parallelism
       enable_multiprocessing: enable workers in separate process(es)
       send_one_request: send one request to engine before deleting
+
     """
     if current_platform.device_count() < tensor_parallel_size:
         pytest.skip(reason="Not enough CUDA devices")
@@ -87,7 +95,12 @@ def test_llm_delete(
 
         # Instantiate LLM; make request to complete any deferred
         # initialization; then delete instance
-        llm = LLM(model=model, enforce_eager=True, tensor_parallel_size=tensor_parallel_size)
+        llm = LLM(
+            model=model,
+            enforce_eager=True,
+            tensor_parallel_size=tensor_parallel_size,
+            kernel_config=KernelConfig(enable_jit_warmup=False),
+        )
         if send_one_request:
             llm.generate("Hello my name is", sampling_params=SamplingParams(max_tokens=1))
         del llm
@@ -112,7 +125,10 @@ def test_llm_delete_inprocess(
     with monkeypatch.context() as m:
         m.setenv("APHRODITE_ENABLE_V1_MULTIPROCESSING", "0")
 
-        with AphroditeRunner(model) as aphrodite_model:
+        with AphroditeRunner(
+            model,
+            kernel_config=KernelConfig(enable_jit_warmup=False),
+        ) as aphrodite_model:
             if send_one_request:
                 aphrodite_model.generate(
                     ["Hello my name is"],

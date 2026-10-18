@@ -3,6 +3,7 @@
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Annotated, Literal
 
+import regex as re
 import torch
 import torch.nn as nn
 from transformers import AriaConfig, AriaTextConfig, BatchFeature
@@ -10,7 +11,7 @@ from transformers.models.aria.modeling_aria import AriaCrossAttention
 from transformers.models.aria.processing_aria import AriaProcessor
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.config.multimodal import BaseDummyOptions, ImageDummyOptions
+from aphrodite.config.multimodal import MultiModalDummyOptions
 from aphrodite.inputs import MultiModalDataDict
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.layers.fused_moe import FusedMoEFactory
@@ -41,13 +42,12 @@ from .utils import AutoWeightsLoader, WeightsMapper, maybe_prefix
 
 
 class AriaImagePixelInputs(TensorSchema):
-    """
-    Dimensions:
-        - b: Batch size
-        - n: Number of images
-        - c: Number of channels
-        - h: Height of each image
-        - w: Width of each image
+    """Dimensions:
+    - b: Batch size
+    - n: Number of images
+    - c: Number of channels
+    - h: Height of each image
+    - w: Width of each image
     """
 
     type: Literal["pixel_values"]
@@ -115,8 +115,7 @@ class AriaProjectorMLP(nn.Module):
 
 
 class AriaProjector(nn.Module):
-    """
-    A projection module with one cross attention layer and one FFN layer, which
+    """A projection module with one cross attention layer and one FFN layer, which
     projects ViT's outputs into MoE's inputs.
 
     Args:
@@ -125,6 +124,7 @@ class AriaProjector(nn.Module):
 
     Outputs:
         A tensor with the shape of (batch_size, query_number, output_dim)
+
     """
 
     def __init__(self, config: AriaConfig, prefix: str = "") -> None:
@@ -178,8 +178,7 @@ class AriaProjector(nn.Module):
 
 
 class AriaTextMoELayer(nn.Module):
-    """
-    Mixture of Experts (MoE) Layer for the AriaMoE model.
+    """Mixture of Experts (MoE) Layer for the AriaMoE model.
 
     This layer implements the MoE mechanism, which routes input tokens to
     different experts based on a routing algorithm, processes them through the
@@ -213,11 +212,11 @@ class AriaTextMoELayer(nn.Module):
             intermediate_size=config.intermediate_size,
             quant_config=quant_config,
             prefix=f"{prefix}.experts",
+            is_fused_checkpoint_transposed=True,
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the MoE Layer.
+        """Forward pass of the MoE Layer.
 
         Args:
             hidden_states: Input tensor of shape
@@ -225,16 +224,15 @@ class AriaTextMoELayer(nn.Module):
 
         Returns:
             torch.Tensor: Output tensor after passing through the MoE layer.
-        """
 
+        """
         router_output = torch.nn.functional.linear(hidden_states, self.router_weight)
 
         return self.experts(hidden_states, router_output)
 
 
 class AriaTextDecoderLayer(LlamaDecoderLayer):
-    """
-    Custom Decoder Layer for the AriaMoE model which modifies the standard
+    """Custom Decoder Layer for the AriaMoE model which modifies the standard
     `LlamaDecoderLayer` by replacing the traditional MLP with a Mixture of
     Experts (MoE) Layer.
     """
@@ -249,8 +247,7 @@ class AriaTextDecoderLayer(LlamaDecoderLayer):
 
 
 class AriaTextModel(LlamaModel, SupportsQuant):
-    """
-    Custom LlamaModel for the AriaMoE model which modifies the standard
+    """Custom LlamaModel for the AriaMoE model which modifies the standard
     LlamaModel by replacing the `LlamaDecoderLayer` with `MoEDecoderLayer`.
     """
 
@@ -259,14 +256,17 @@ class AriaTextModel(LlamaModel, SupportsQuant):
         "gate_up_proj": ["gate_proj", "up_proj"],
     }
 
-    # Aria packs all experts into single (transposed) fc1/fc2 tensors, which is
-    # exactly the pre-fused checkpoint layout FusedMoEFactory self-loads once fc1/fc2
-    # are renamed to the fused gate_up_proj/down_proj names.
+    # The fused expert loader expects names without the .weight suffix.
     hf_to_aphrodite_mapper = LlamaModel.hf_to_aphrodite_mapper | WeightsMapper(
+        orig_to_new_regex={
+            re.compile(r"experts\.fc1\.weight$"): "experts.gate_up_proj",
+            re.compile(r"experts\.fc2\.weight$"): "experts.down_proj",
+        },
+        # Quantization configs also use the expert module names.
         orig_to_new_substr={
             "experts.fc1": "experts.gate_up_proj",
             "experts.fc2": "experts.down_proj",
-        }
+        },
     )
 
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = ""):
@@ -305,22 +305,18 @@ class AriaDummyInputsBuilder(BaseDummyInputsBuilder[AriaProcessingInfo]):
         self,
         seq_len: int,
         mm_counts: Mapping[str, int],
-        mm_options: Mapping[str, BaseDummyOptions],
+        mm_options: MultiModalDummyOptions,
     ) -> MultiModalDataDict:
         vision_config = self.info.get_vision_config()
 
         max_image_size = vision_config.image_size
-        num_images = mm_counts.get("image", 0)
-
-        image_overrides = mm_options.get("image")
-        assert image_overrides is None or isinstance(image_overrides, ImageDummyOptions)
 
         return {
             "image": self._get_dummy_images(
                 width=max_image_size,
                 height=max_image_size,
-                num_images=num_images,
-                overrides=image_overrides,
+                num_images=mm_counts.get("image", 0),
+                overrides=mm_options.get("image"),
             )
         }
 
@@ -362,8 +358,7 @@ class AriaMultiModalProcessor(BaseMultiModalProcessor[AriaProcessingInfo]):
     dummy_inputs=AriaDummyInputsBuilder,
 )
 class AriaForConditionalGeneration(nn.Module, SupportsMultiModal):
-    """
-    Aria model for conditional generation tasks.
+    """Aria model for conditional generation tasks.
 
     This model combines a vision tower, a multi-modal projector, and a language
     model to perform tasks that involve both image and text inputs.
@@ -508,6 +503,9 @@ class AriaForConditionalGeneration(nn.Module, SupportsMultiModal):
         logits = self.logits_processor(self.lm_head, hidden_states)
         return logits
 
-    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
+    def load_weights(
+        self,
+        weights: Iterable[tuple[str, torch.Tensor]],
+    ) -> set[str]:
         loader = AutoWeightsLoader(self)
-        loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)
+        return loader.load_weights(weights, mapper=self.hf_to_aphrodite_mapper)

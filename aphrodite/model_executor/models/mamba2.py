@@ -189,6 +189,7 @@ class Mamba2ForCausalLM(nn.Module, HasInnerState, IsAttentionFree, SupportsMamba
             Tuple containing:
             - conv_state_shape: Shape for convolutional state cache
             - temporal_state_shape: Shape for state space model cache
+
         """
         parallel_config = aphrodite_config.parallel_config
         hf_config = aphrodite_config.model_config.hf_config

@@ -8,7 +8,7 @@ from argparse import Namespace
 
 from aphrodite import AsyncEngineArgs, envs
 from aphrodite.config import AphroditeConfig
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_from_args, init_logger
 
 from ..app import build_app
 from ..launcher import serve_http, setup_server
@@ -30,7 +30,6 @@ async def build_and_serve_renderer(
 
     Returns the shutdown task for the caller to await.
     """
-
     # Get uvicorn log config (from file or with endpoint filter)
     log_config = get_uvicorn_log_config(args)
     if log_config is not None:
@@ -88,7 +87,15 @@ async def run_launch_fastapi(args: argparse.Namespace) -> None:
     # cache space warning from CpuPlatform.check_and_update_config.
     envs.APHRODITE_CPU_KVCACHE_SPACE = 0
 
-    aphrodite_config = AphroditeConfig(model_config=model_config)
+    # Merge frontend parser flags (e.g. --reasoning-parser) into the
+    # structured outputs config, mirroring `create_engine_config`, which this
+    # GPU-less entrypoint bypasses. Model-specific defaults are then applied
+    # by `verify_and_update_config` during AphroditeConfig construction.
+    aphrodite_config = AphroditeConfig(
+        model_config=model_config,
+        logging_config=engine_args.create_logging_config(),
+        structured_outputs_config=engine_args.create_structured_outputs_config(),
+    )
     shutdown_task = await build_and_serve_renderer(aphrodite_config, listen_address, sock, args)
     try:
         await shutdown_task
@@ -113,6 +120,7 @@ if __name__ == "__main__":
     )
     parser = make_arg_parser(parser)
     args = parser.parse_args()
+    configure_logging_from_args(args)
     validate_parsed_serve_args(args)
 
     uvloop.run(run_launch_fastapi(args))

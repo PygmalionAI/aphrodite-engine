@@ -5,7 +5,7 @@ import logging
 from typing import Literal
 
 import pytest
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config.model import ModelConfig
 from aphrodite.config.parallel import ParallelConfig
@@ -31,30 +31,24 @@ def _override_logged(caplog: pytest.LogCaptureFixture) -> bool:
 
 
 @pytest.mark.cpu_test
-def test_override_raises_smaller_value(
-    aphrodite_caplog: pytest.LogCaptureFixture,
-):
-    hf_config = PretrainedConfig(max_position_embeddings=2048)
+def test_override_raises_smaller_value(aphrodite_caplog: pytest.LogCaptureFixture):
+    hf_config = PreTrainedConfig(max_position_embeddings=2048)
     SpeculativeConfig._maybe_override_draft_max_position_embeddings(hf_config, target_max_model_len=8192)
     assert hf_config.max_position_embeddings == 8192
     assert _override_logged(aphrodite_caplog)
 
 
 @pytest.mark.cpu_test
-def test_override_keeps_sufficient_value(
-    aphrodite_caplog: pytest.LogCaptureFixture,
-):
-    hf_config = PretrainedConfig(max_position_embeddings=8192)
+def test_override_keeps_sufficient_value(aphrodite_caplog: pytest.LogCaptureFixture):
+    hf_config = PreTrainedConfig(max_position_embeddings=8192)
     SpeculativeConfig._maybe_override_draft_max_position_embeddings(hf_config, target_max_model_len=8192)
     assert hf_config.max_position_embeddings == 8192
     assert not _override_logged(aphrodite_caplog)
 
 
 @pytest.mark.cpu_test
-def test_override_ignores_missing_attribute(
-    aphrodite_caplog: pytest.LogCaptureFixture,
-):
-    hf_config = PretrainedConfig()
+def test_override_ignores_missing_attribute(aphrodite_caplog: pytest.LogCaptureFixture):
+    hf_config = PreTrainedConfig()
     hf_config.__dict__.pop("max_position_embeddings", None)
     SpeculativeConfig._maybe_override_draft_max_position_embeddings(hf_config, target_max_model_len=8192)
     assert not hasattr(hf_config, "max_position_embeddings")

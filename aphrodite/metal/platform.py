@@ -358,25 +358,25 @@ class MetalPlatform(Platform):
         return True
 
     @classmethod
-    def _find_non_ssm_backend(cls, aphrodite_config: "AphroditeConfig") -> "type[AttentionBackend] | None":
-        """Return a Metal-specific backend for block_size calculation.
+    def _find_non_ssm_backends(cls, aphrodite_config: "AphroditeConfig") -> "list[type[AttentionBackend]]":
+        """Return the Metal-specific backend for block_size calculation.
 
         Since MLX models don't populate static_forward_context, the default
-        Platform._find_non_ssm_backend (which walks attention layers via
+        Platform._find_non_ssm_backends (which walks attention layers via
         get_layers_from_aphrodite_config) returns nothing. We override to return
         the synthetic MetalBackend, which advertises Metal's MultipleOf(16)
         kernel alignment to the framework's hybrid-block-size math.
         """
         from aphrodite.metal.metal_backend import MetalBackend
 
-        return MetalBackend
+        return [MetalBackend]
 
     @classmethod
     def update_block_size_for_backend(cls, aphrodite_config: "AphroditeConfig") -> None:
         """Update block_size for Metal platform.
 
         Delegates to Aphrodite's base implementation, which reads the Metal kernel
-        alignment (MultipleOf(16)) from our :meth:`_find_non_ssm_backend`
+        alignment (MultipleOf(16)) from our :meth:`_find_non_ssm_backends`
         override. Adds a one-time warning when paged attention is enabled for
         a hybrid model, explaining the cache-block-size translation mechanism
         (PR #235).
@@ -421,7 +421,7 @@ class MetalPlatform(Platform):
                 "  This is a logical transformation — physical memory is unchanged."
             )
 
-        # Delegate the rest to upstream. With our ``_find_non_ssm_backend``
+        # Delegate the rest to upstream. With our ``_find_non_ssm_backends``
         # returning :class:`MetalBackend` (which advertises ``MultipleOf(16)``),
         # Aphrodite's Phase 1 picks a kernel-aligned default of 16 for non-hybrid
         # models (matching the kernel sweet spot), and Phase 2

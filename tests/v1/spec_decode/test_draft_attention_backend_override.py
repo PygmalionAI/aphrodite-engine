@@ -6,11 +6,13 @@
 assert on the config ``load_eagle_model`` hands to ``get_model``.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from aphrodite.config import LoadConfig, SpeculativeConfig
 from aphrodite.v1.worker.gpu.spec_decode.eagle.utils import load_eagle_model
 
 
@@ -35,6 +37,9 @@ class _SpeculativeConfig:
     moe_backend: str | None = None
     kv_cache_dtype: str | None = None
     draft_model_config: object = None
+    draft_load_config: object = None
+
+    apply_draft_overrides = SpeculativeConfig.apply_draft_overrides
 
 
 @dataclass
@@ -43,6 +48,7 @@ class _AphroditeConfig:
     kernel_config: _KernelConfig
     cache_config: _CacheConfig
     speculative_config: _SpeculativeConfig
+    load_config: LoadConfig = field(default_factory=LoadConfig)
 
 
 def _config(target_backend: str, draft_backend: str | None) -> _AphroditeConfig:
@@ -65,6 +71,10 @@ def _capture_draft_config(cfg):
 
     with (
         patch("aphrodite.v1.worker.gpu.spec_decode.eagle.utils.get_model", _fake_get_model),
+        patch(
+            "aphrodite.v1.worker.gpu.spec_decode.utils.get_pp_group",
+            return_value=SimpleNamespace(world_size=1),
+        ),
         pytest.raises(_Captured) as exc,
     ):
         load_eagle_model(object(), cfg)

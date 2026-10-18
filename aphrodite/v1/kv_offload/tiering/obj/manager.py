@@ -22,6 +22,7 @@ from aphrodite.v1.kv_offload.base import (
 )
 from aphrodite.v1.kv_offload.file_mapper import FileMapper
 from aphrodite.v1.kv_offload.tiering.async_lookup import AsyncLookupManager
+from aphrodite.v1.kv_offload.tiering.backpressure import BackpressureDetector
 from aphrodite.v1.kv_offload.tiering.base import (
     JobId,
     JobResult,
@@ -111,22 +112,29 @@ class ObjectStoreSecondaryTierManager(SecondaryTierManager):
         io_threads: int = 4,
         enable_kv_events: bool = False,
         locality: str | None = None,
+        backpressure_detector: BackpressureDetector | None = None,
     ):
+        """Args:
+        offloading_spec: Offloading configuration.
+        primary_kv_view: Memoryview of the primary tier's CPU KV cache.
+        tier_type: Tier type identifier, set by SecondaryTierFactory.
+        store_config: Object store connection parameters (see ObjStoreConfig).
+        prefix: Key prefix prepended to all object keys.
+        io_threads: Number of NIXL I/O threads.
+        enable_kv_events: Emit BlockStored KV events for blocks
+            successfully stored to this tier. Effective only when KV
+            cache events are enabled globally (kv_events_config).
+        locality: Whether this tier's storage is LOCAL or REMOTE relative
+            to the publishing Aphrodite instance.
+        backpressure_detector: Optional backpressure detector.
+
         """
-        Args:
-            offloading_spec: Offloading configuration.
-            primary_kv_view: Memoryview of the primary tier's CPU KV cache.
-            tier_type: Tier type identifier, set by SecondaryTierFactory.
-            store_config: Object store connection parameters (see ObjStoreConfig).
-            prefix: Key prefix prepended to all object keys.
-            io_threads: Number of NIXL I/O threads.
-            enable_kv_events: Emit BlockStored KV events for blocks
-                successfully stored to this tier. Effective only when KV
-                cache events are enabled globally (kv_events_config).
-            locality: Whether this tier's storage is LOCAL or REMOTE relative
-                to the publishing Aphrodite instance.
-        """
-        super().__init__(offloading_spec, primary_kv_view, tier_type)
+        super().__init__(
+            offloading_spec,
+            primary_kv_view,
+            tier_type,
+            backpressure_detector,
+        )
         self.locality = Locality(locality) if locality is not None else None
 
         self.events: list[OffloadingEvent] | None = None
@@ -273,12 +281,12 @@ class ObjectStoreSecondaryTierManager(SecondaryTierManager):
         if self.events is not None:
             self._store_job_keys[job_metadata.job_id] = list(job_metadata.keys)
         obj_keys = (self._file_mapper.get_file_name(k) for k in job_metadata.keys)
-        self._submit_transfer(job_metadata.job_id, job_metadata.block_ids, obj_keys, NIXL_WRITE)
+        self._submit_transfer(job_metadata.job_id, job_metadata.chunk_ids, obj_keys, NIXL_WRITE)
 
     def submit_load(self, job_metadata: TransferJob) -> None:
         self._load_job_keys[job_metadata.job_id] = list(job_metadata.keys)
         obj_keys = (self._file_mapper.get_file_name(k) for k in job_metadata.keys)
-        self._submit_transfer(job_metadata.job_id, job_metadata.block_ids, obj_keys, NIXL_READ)
+        self._submit_transfer(job_metadata.job_id, job_metadata.chunk_ids, obj_keys, NIXL_READ)
 
     def on_request_finished(self, req_context: ReqContext) -> None:
         self._lookup_manager.cleanup(req_context.req_id)

@@ -5,6 +5,7 @@
 # The utility function cannot be placed in `aphrodite.utils`
 # this needs to be a standalone script
 import sys
+from unittest.mock import patch
 
 # List of modules that should not be imported too early.
 # Lazy import `torch._inductor.async_compile` to avoid creating
@@ -16,7 +17,5 @@ module_names = ["torch._inductor.async_compile", "cv2"]
 # set all modules in `module_names` to be None.
 # if we import any modules during `import aphrodite`, there would be a
 # hard error and nice stacktrace on the first import.
-for module_name in module_names:
-    sys.modules[module_name] = None  # type: ignore[assignment]
-
-import aphrodite  # noqa
+with patch.dict(sys.modules, dict.fromkeys(module_names)):
+    import aphrodite  # noqa: F401

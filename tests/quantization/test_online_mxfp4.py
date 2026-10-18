@@ -10,6 +10,7 @@ against the pure-torch reference in `reference_mxfp4.py`.
 import pytest
 import torch
 
+from aphrodite.config.kernel import MoEBackend
 from aphrodite.config.model import ModelConfig
 from aphrodite.model_executor.kernels.linear import _POSSIBLE_MXFP4_KERNELS
 from aphrodite.model_executor.kernels.linear.mxfp4.aiter import (
@@ -128,8 +129,7 @@ def _skip_reason_if_unavailable(backend: str, dtype: torch.dtype) -> str | None:
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 @pytest.mark.parametrize("backend", ["triton", "aiter", "xpu", "quark"])
 def test_mxfp4_quantization_correctness(backend: str, dtype: torch.dtype):
-    """
-    Tests that the different implementations of mxfp4_quantize
+    """Tests that the different implementations of mxfp4_quantize
     in mxfp4_utils.py all match.
     """
     skip_reason = _skip_reason_if_unavailable(backend, dtype)
@@ -264,15 +264,14 @@ def test_online_mxfp4_tp_weight_quant_matches_unsharded(tp_size: int):
     ],
 )
 def test_online_mxfp4_moe_matches_quark(
-    moe_backend: str,
+    moe_backend: MoEBackend,
     unpadded_hidden_size: int,
     unpadded_intermediate_size: int,
     default_aphrodite_config,
     dist_init,
     monkeypatch,
 ):
-    """
-    Ensures `Mxfp4OnlineMoEMethod` (online quantization)
+    """Ensures `Mxfp4OnlineMoEMethod` (online quantization)
     and `QuarkOCP_MX_MoEMethod` (AMD Quark checkpoints) produce the same weights,
     with same MOE backend used.
 
@@ -462,8 +461,7 @@ def test_online_mxfp4_moe_matches_quark(
 @pytest.mark.skipif(not current_platform.is_cuda_alike(), reason="Only tested on ROCm/CUDA.")
 @pytest.mark.parametrize("linear_backend", ["emulation", "aiter", "marlin"])
 def test_online_mxfp4_dense_matches_quark(linear_backend: str, default_aphrodite_config, dist_init, monkeypatch):
-    """
-    Ensures `Mxfp4OnlineLinearMethod` (online quantization)
+    """Ensures `Mxfp4OnlineLinearMethod` (online quantization)
     and `QuarkOCP_MX` (AMD Quark checkpoints) produce the same weights,
     with same linear backend used.
     """

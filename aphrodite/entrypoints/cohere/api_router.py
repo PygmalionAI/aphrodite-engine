@@ -17,9 +17,10 @@ log) and Aphrodite continues to boot normally.
 
 Even when the SDK is installed, :func:`attach_router` also requires
 ``APHRODITE_ENABLE_COHERE_API=1`` in the environment before it will expose
-the chat route. The render route additionally requires
-``APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS=1``. These gates keep unrelated
-deployments from accidentally exposing the APIs.
+the chat route. The render route additionally requires scale-out
+endpoints to be enabled, i.e. ``--enable-scale-out`` or
+``--tokens-only``. These gates keep unrelated deployments from
+accidentally exposing the APIs.
 
 Note: the handlers must live at module scope (not inside
 ``attach_router``) so that FastAPI's ``typing.get_type_hints`` resolves
@@ -39,6 +40,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import aphrodite.envs as envs
 from aphrodite.entrypoints.serve.engine.protocol import ErrorResponse
+from aphrodite.entrypoints.serve.exception_handling.error_response import (
+    create_error_response,
+)
 from aphrodite.entrypoints.serve.exception_handling.utils import sanitize_message
 from aphrodite.entrypoints.serve.utils.api_utils import (
     load_aware_call,
@@ -137,15 +141,9 @@ if _SDK_AVAILABLE:
 
         try:
             result = await handler.create_chat_v2(request, raw_request)
-        except Exception as e:  # noqa: BLE001 - report as 500 for parity
+        except Exception as e:
             logger.exception("Error in /cohere/v2/chat: %s", e)
-            return JSONResponse(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value,
-                content=CohereError(
-                    message=sanitize_message(str(e)),
-                    id=_request_id(raw_request),
-                ).model_dump(exclude_none=True),
-            )
+            return _error_response(create_error_response(e), raw_request)
 
         match result:
             case ErrorResponse():
@@ -191,18 +189,15 @@ if _SDK_AVAILABLE:
         try:
             chat_request = handler.to_chat_completion_request(request)
             result = await render_handler.render_chat_request(chat_request)
-        except Exception as e:  # noqa: BLE001 - report as 500 for parity
+        except Exception as e:
             logger.exception("Error in /cohere/v2/chat/render: %s", e)
-            return JSONResponse(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value,
-                content=CohereError(
-                    message=sanitize_message(str(e)),
-                    id=_request_id(raw_request),
-                ).model_dump(exclude_none=True),
-            )
+            return _error_response(create_error_response(e), raw_request)
 
         if isinstance(result, ErrorResponse):
             return _error_response(result, raw_request)
+
+        if (kwargs := result.reasoning_parser_kwargs) is not None:
+            kwargs.chat_template_kwargs = handler._engine_chat_template_kwargs(kwargs.chat_template_kwargs)
 
         return JSONResponse(content=result.model_dump())
 
@@ -296,6 +291,7 @@ def attach_router(app: FastAPI) -> None:
         )
         return
     app.include_router(router)
-    if envs.APHRODITE_ENABLE_SCALE_OUT_ENDPOINTS:
+    args = getattr(app.state, "args", None)
+    if getattr(args, "enable_scale_out", False) or getattr(args, "tokens_only", False):
         app.include_router(render_router)
     app.add_middleware(CohereErrorEnvelopeMiddleware)

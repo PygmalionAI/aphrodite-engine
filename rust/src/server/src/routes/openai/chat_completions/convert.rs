@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-use itertools::Itertools as _;
 use aphrodite_chat::{
     AssistantContentBlock, AssistantToolCall, ChatContent, ChatContentPart,
     ChatMessage as AphroditeChatMessage, ChatOptions, ChatRequest, ChatTool, ChatToolChoice,
     GenerationPromptMode, ResolvedToolContext, SamplingParams,
 };
+use itertools::Itertools as _;
 
 use super::types::ChatCompletionRequest;
 use super::validate;
@@ -126,6 +126,13 @@ pub(super) fn prepare_chat_request(
         .prompt_logprobs
         .or((request.echo && !request.stream).then_some(top_logprobs));
     let include_prompt_logprobs = prompt_logprobs.is_some();
+    let logprob_token_ids = request.logprob_token_ids.filter(|ids| !ids.is_empty());
+    let logprobs = (request.logprobs && logprob_token_ids.is_none()).then_some(top_logprobs);
+    let output_top_logprobs = if logprob_token_ids.is_some() {
+        -1
+    } else {
+        top_logprobs
+    };
 
     let structured_outputs = convert_from_response_format(
         request.response_format.as_ref(),
@@ -149,15 +156,19 @@ pub(super) fn prepare_chat_request(
         request_id: request_id.clone(),
         messages,
         sampling_params: SamplingParams {
+            aphrodite_sampling: request.aphrodite_sampling,
             temperature: request.temperature,
+            watermarking: request.watermarking,
             top_p: request.top_p,
             top_k: request.top_k,
             seed: request.seed,
             max_tokens: request.max_completion_tokens,
             min_tokens: request.min_tokens,
             thinking_token_budget: request.thinking_token_budget,
-            logprobs: request.logprobs.then_some(top_logprobs),
+            logprobs,
             prompt_logprobs,
+            prompt_logprob_token_ids: None,
+            prompt_logprob_start: None,
             min_p: request.min_p,
             frequency_penalty: request.frequency_penalty,
             presence_penalty: request.presence_penalty,
@@ -168,18 +179,23 @@ pub(super) fn prepare_chat_request(
             logit_bias: convert_logit_bias(request.logit_bias)?,
             allowed_token_ids: request.allowed_token_ids,
             bad_words: request.bad_words,
-            logprob_token_ids: None,
+            bad_words_token_ids: None,
+            logprob_token_ids,
             structured_outputs,
             skip_reading_prefix_cache: None,
             aphrodite_xargs: merge_kv_transfer_params(
-                merge_ec_transfer_params(request.aphrodite_xargs, request.ec_transfer_params.as_ref()),
+                merge_ec_transfer_params(
+                    request.aphrodite_xargs,
+                    request.ec_transfer_params.as_ref(),
+                ),
                 request.kv_transfer_params.as_ref(),
             ),
+            stream_interval: request.stream_interval,
         },
         chat_options: ChatOptions {
             generation_prompt_mode,
             chat_template: request.chat_template,
-            reasoning_effort: request.reasoning_effort,
+            reasoning_effort: request.reasoning_effort.map(|effort| effort.as_str().into()),
             response_format,
             template_kwargs,
         },
@@ -208,7 +224,7 @@ pub(super) fn prepare_chat_request(
             include_usage,
             include_continuous_usage,
             requested_logprobs,
-            output_top_logprobs: top_logprobs,
+            output_top_logprobs,
             include_prompt_logprobs,
             include_reasoning,
             echo,
@@ -271,7 +287,9 @@ pub(crate) fn convert_message(message: ChatMessage) -> Result<AphroditeChatMessa
         ChatMessage::System { content, .. } => {
             Ok(AphroditeChatMessage::system(convert_content(content)?))
         }
-        ChatMessage::User { content, .. } => Ok(AphroditeChatMessage::user(convert_content(content)?)),
+        ChatMessage::User { content, .. } => {
+            Ok(AphroditeChatMessage::user(convert_content(content)?))
+        }
         ChatMessage::Assistant {
             content,
             tool_calls,
@@ -315,6 +333,10 @@ pub(crate) fn convert_message(message: ChatMessage) -> Result<AphroditeChatMessa
         } => Ok(AphroditeChatMessage::developer(
             convert_content(content)?,
             convert_message_tools(tools)?,
+        )),
+        ChatMessage::Custom { role, content } => Ok(AphroditeChatMessage::custom(
+            role,
+            convert_content(content)?,
         )),
     }
 }
@@ -403,6 +425,7 @@ pub(crate) fn convert_tools(tools: Option<Vec<Tool>>) -> Result<Vec<ChatTool>, A
                 description: tool.function.description,
                 parameters: tool.function.parameters,
                 strict: tool.function.strict,
+                defer_loading: tool.function.defer_loading.or(tool.defer_loading),
             })
         })
         .collect()
@@ -435,22 +458,25 @@ fn convert_tool_choice(tool_choice: &ToolChoice) -> Result<ChatToolChoice, ApiEr
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::num::NonZeroU32;
     use std::sync::Arc;
 
-    use axum::http::HeaderMap;
-    use expect_test::expect;
-    use llm_multimodal::ImageDetail;
-    use serde_json::json;
-    use validator::Validate;
     use aphrodite_chat::{
-        AssistantContentBlock, AssistantToolCall, ChatContentPart, ChatMessage as AphroditeChatMessage,
-        ChatRenderer, ChatTool as AphroditeChatTool, ChatToolChoice, GenerationPromptMode,
-        KimiK3ChatRenderer, SamplingParams as AphroditeSamplingParams,
+        AssistantContentBlock, AssistantToolCall, ChatContentPart,
+        ChatMessage as AphroditeChatMessage, ChatRenderer, ChatTool as AphroditeChatTool,
+        ChatToolChoice, GenerationPromptMode, KimiK3ChatRenderer,
+        SamplingParams as AphroditeSamplingParams,
     };
     use aphrodite_text::{
         Prompt, PromptTruncation, PromptTruncationLimit, TruncationSide, output::TextDecodeOptions,
     };
     use aphrodite_tokenizer::{Tokenizer, test_utils::TestTokenizer};
+    use axum::http::{HeaderMap, StatusCode};
+    use expect_test::expect;
+    use llm_multimodal::ImageDetail;
+    use serde_json::json;
+    use thiserror_ext::AsReport as _;
+    use validator::Validate;
 
     use super::prepare_chat_request;
     use crate::lora::LoraModelResolution;
@@ -485,6 +511,59 @@ mod tests {
             stream: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn chat_http_reasoning_effort_preserves_omission_none_and_kwargs() {
+        for effort in [None, Some(json!(null))].into_iter().chain(
+            ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+                .map(|name| Some(json!(name))),
+        ) {
+            let kwargs = json!({"reasoning_effort": 37, "thinking": true});
+            let mut value = json!({
+                "messages": [{"role": "user", "content": "hello"}],
+                "chat_template_kwargs": kwargs,
+            });
+            if let Some(effort) = &effort {
+                value["reasoning_effort"] = effort.clone();
+            }
+            let request: ChatCompletionRequest = serde_json::from_value(value).unwrap();
+            let prepared = prepare_chat_request(
+                request,
+                &served(&["test-model"]),
+                request_context(&HeaderMap::new(), None),
+            )
+            .unwrap();
+            let options = prepared.chat_request.chat_options;
+            assert_eq!(
+                serde_json::to_value(options.reasoning_effort).unwrap(),
+                effort.unwrap_or(serde_json::Value::Null)
+            );
+            assert_eq!(
+                serde_json::to_value(options.template_kwargs).unwrap(),
+                kwargs
+            );
+        }
+    }
+
+    #[test]
+    fn chat_http_reasoning_effort_rejects_model_extensions_at_top_level() {
+        for effort in [json!(37), json!("custom")] {
+            let request = json!({
+                "messages": [{"role": "user", "content": "hello"}],
+                "reasoning_effort": effort,
+            });
+            assert!(serde_json::from_value::<ChatCompletionRequest>(request).is_err());
+        }
+    }
+
+    #[test]
+    fn chat_http_request_rejects_zero_stream_interval() {
+        let request = json!({
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream_interval": 0,
+        });
+        assert!(serde_json::from_value::<ChatCompletionRequest>(request).is_err());
     }
 
     #[test]
@@ -584,6 +663,61 @@ mod tests {
     }
 
     #[test]
+    fn prepare_chat_request_rejects_empty_json_schema() {
+        let mut request = base_request();
+        request.response_format = Some(ResponseFormat::JsonSchema {
+            json_schema: JsonSchemaFormat {
+                name: "answer".to_string(),
+                description: None,
+                schema: json!("  "),
+                strict: None,
+            },
+        });
+
+        let error = prepare_chat_request(
+            request,
+            &served(&["Qwen/Qwen1.5-0.5B-Chat"]),
+            ResolvedRequestContext::default(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+        assert!(
+            error
+                .to_error_response()
+                .error
+                .message
+                .contains("json cannot be an empty string")
+        );
+    }
+
+    #[test]
+    fn prepare_chat_request_rejects_whitespace_only_structured_outputs_grammar() {
+        let request: ChatCompletionRequest = serde_json::from_value(json!({
+            "model": "Qwen/Qwen1.5-0.5B-Chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "structured_outputs": {"grammar": " \t\n"},
+        }))
+        .expect("parse structured_outputs");
+
+        let error = prepare_chat_request(
+            request,
+            &served(&["Qwen/Qwen1.5-0.5B-Chat"]),
+            ResolvedRequestContext::default(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
+        assert!(
+            error
+                .to_error_response()
+                .error
+                .message
+                .contains("grammar cannot be an empty string")
+        );
+    }
+
+    #[test]
     fn prepare_chat_request_defaults_function_tool_fields() {
         let request: ChatCompletionRequest = serde_json::from_value(json!({
             "model": "Qwen/Qwen1.5-0.5B-Chat",
@@ -606,7 +740,47 @@ mod tests {
                 description: None,
                 parameters: serde_json::Value::Null,
                 strict: None,
+                defer_loading: None,
             }]
+        );
+    }
+
+    #[test]
+    fn prepare_chat_request_maps_tool_defer_loading() {
+        let request: ChatCompletionRequest = serde_json::from_value(json!({
+            "model": "Qwen/Qwen1.5-0.5B-Chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"function": {"name": "tool_level"}, "defer_loading": true},
+                {"function": {"name": "function_level", "defer_loading": true}},
+                {
+                    "function": {"name": "function_wins", "defer_loading": false},
+                    "defer_loading": true,
+                },
+            ],
+        }))
+        .expect("parse defer_loading");
+
+        let prepared = prepare_chat_request(
+            request,
+            &served(&["Qwen/Qwen1.5-0.5B-Chat"]),
+            ResolvedRequestContext::default(),
+        )
+        .expect("prepare defer_loading");
+
+        let defer_loading = prepared
+            .chat_request
+            .tools()
+            .iter()
+            .map(|tool| (tool.name.as_str(), tool.defer_loading))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            defer_loading,
+            [
+                ("tool_level", Some(true)),
+                ("function_level", Some(true)),
+                ("function_wins", Some(false)),
+            ]
         );
     }
 
@@ -691,7 +865,7 @@ mod tests {
         );
 
         let tokenizer = Arc::new(TestTokenizer::new());
-        let prompt = KimiK3ChatRenderer::new(tokenizer.clone())
+        let prompt = KimiK3ChatRenderer::new(tokenizer.clone(), Default::default())
             .render(&prepared.chat_request)
             .expect("Kimi K3 rendering succeeds")
             .prompt;
@@ -849,6 +1023,59 @@ mod tests {
     }
 
     #[test]
+    fn prepare_chat_request_preserves_flattened_sonar_samplers() {
+        use aphrodite_engine_core_client::protocol::sampling::AphroditeSamplingParams;
+
+        for expected in [
+            AphroditeSamplingParams::default(),
+            AphroditeSamplingParams {
+                no_repeat_ngram_size: 3,
+                dynatemp_min: 0.2,
+                dynatemp_max: 1.4,
+                dynatemp_exponent: 1.5,
+                temperature_last: true,
+                top_a: 0.2,
+                tfs: 0.9,
+                eta_cutoff: 0.1,
+                epsilon_cutoff: 0.01,
+                typical_p: 0.95,
+                smoothing_factor: 0.3,
+                smoothing_curve: 1.2,
+                xtc_threshold: 0.2,
+                xtc_probability: 0.4,
+                nsigma: 2.0,
+                mirostat_mode: 2,
+                mirostat_tau: 5.0,
+                mirostat_eta: 0.1,
+                dry_multiplier: 0.8,
+                dry_base: 1.9,
+                dry_allowed_length: 3,
+                dry_sequence_breakers: Some(vec!["\n".to_string()]),
+                dry_sequence_breaker_ids: vec![10],
+                dry_range: 512,
+                dry_max_ngram: 16,
+                dry_max_occurrences: 10,
+                dry_early_exit_match_len: 9,
+                skew: 0.1,
+            },
+        ] {
+            let mut value = serde_json::to_value(&expected).unwrap();
+            value["messages"] = json!([{"role": "user", "content": "hello"}]);
+            let request: ChatCompletionRequest = serde_json::from_value(value).unwrap();
+            let prepared = prepare_chat_request(
+                request,
+                &served(&["test-model"]),
+                ResolvedRequestContext::default(),
+            )
+            .expect("prepare Sonar samplers");
+            assert_eq!(
+                prepared.chat_request.sampling_params.aphrodite_sampling,
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn prepare_chat_request_preserves_sampling_passthrough_fields() {
         let request = ChatCompletionRequest {
             seed: Some(42),
@@ -856,6 +1083,7 @@ mod tests {
             frequency_penalty: Some(0.3),
             presence_penalty: Some(0.4),
             repetition_penalty: Some(1.1),
+            stream_interval: NonZeroU32::new(4),
             ..base_request()
         };
 
@@ -871,6 +1099,7 @@ mod tests {
             frequency_penalty: Some(0.3),
             presence_penalty: Some(0.4),
             repetition_penalty: Some(1.1),
+            stream_interval: NonZeroU32::new(4),
             ..AphroditeSamplingParams::default()
         };
         assert_eq!(prepared.chat_request.sampling_params, expected);
@@ -916,7 +1145,9 @@ mod tests {
                             "properties": {"city": {"type": "string"}},
                         }),
                         strict: Some(true),
+                        defer_loading: None,
                     },
+                    defer_loading: None,
                 }]),
                 name: None,
             }],
@@ -942,9 +1173,47 @@ mod tests {
                         "properties": {"city": {"type": "string"}},
                     }),
                     strict: Some(true),
+                    defer_loading: None,
                 }]),
             )]
         );
+    }
+
+    #[test]
+    fn prepare_chat_request_accepts_custom_role_messages() {
+        let request: ChatCompletionRequest = serde_json::from_value(json!({
+            "messages": [
+                {"role": "root", "content": "Custom identity."},
+                {"role": "user", "content": "hello"},
+            ],
+        }))
+        .expect("parse custom role message");
+
+        let prepared = prepare_chat_request(
+            request,
+            &served(&["Qwen/Qwen1.5-0.5B-Chat"]),
+            ResolvedRequestContext::default(),
+        )
+        .expect("request is valid");
+
+        assert_eq!(
+            prepared.chat_request.messages,
+            vec![
+                AphroditeChatMessage::custom("root", "Custom identity."),
+                AphroditeChatMessage::user("hello"),
+            ]
+        );
+    }
+
+    #[test]
+    fn chat_http_message_keeps_standard_role_errors() {
+        let error = serde_json::from_value::<ChatMessage>(json!({
+            "role": "tool",
+            "content": "Sunny",
+        }))
+        .unwrap_err();
+
+        expect!["missing field `tool_call_id`"].assert_eq(&error.to_report_string());
     }
 
     #[test]
@@ -1049,10 +1318,12 @@ mod tests {
 
         assert_eq!(
             prepared.chat_request.messages,
-            vec![AphroditeChatMessage::user(vec![ChatContentPart::VideoUrl {
-                video_url: "https://example.com/video.mp4".to_string(),
-                uuid: Some("video-uuid".to_string()),
-            }])]
+            vec![AphroditeChatMessage::user(vec![
+                ChatContentPart::VideoUrl {
+                    video_url: "https://example.com/video.mp4".to_string(),
+                    uuid: Some("video-uuid".to_string()),
+                }
+            ])]
         );
     }
 
@@ -1238,7 +1509,9 @@ mod tests {
                         "properties": {"city": {"type": "string"}},
                     }),
                     strict: None,
+                    defer_loading: None,
                 },
+                defer_loading: None,
             }]),
             tool_choice: Some(ToolChoice::Value(ToolChoiceValue::None)),
             ..base_request()
@@ -1273,6 +1546,7 @@ mod tests {
                     "properties": {"city": {"type": "string"}},
                 }),
                 strict: None,
+                defer_loading: None,
             }]
         );
         assert_eq!(prepared.chat_request.tool_choice(), &ChatToolChoice::None);
@@ -1291,7 +1565,9 @@ mod tests {
                         "properties": {"city": {"type": "string"}},
                     }),
                     strict: None,
+                    defer_loading: None,
                 },
+                defer_loading: None,
             }]),
             tool_choice: Some(ToolChoice::Value(ToolChoiceValue::Required)),
             ..base_request()
@@ -1324,7 +1600,9 @@ mod tests {
                         "properties": {"city": {"type": "string"}},
                     }),
                     strict: None,
+                    defer_loading: None,
                 },
+                defer_loading: None,
             }]),
             tool_choice: Some(ToolChoice::Function {
                 tool_type: "function".to_string(),
@@ -1349,6 +1627,31 @@ mod tests {
             }
         );
         assert!(prepared.options.is_named_tool_choice);
+    }
+
+    #[test]
+    fn selected_logprobs_override_chat_top_k_unless_empty() {
+        for ids in [vec![10, 20], vec![]] {
+            let request = serde_json::from_value(json!({
+                "messages": [{"role": "user", "content": "hello"}],
+                "logprobs": true, "top_logprobs": 1, "logprob_token_ids": ids,
+            }))
+            .unwrap();
+            let prepared = prepare_chat_request(
+                request,
+                &served(&["test-model"]),
+                ResolvedRequestContext::default(),
+            )
+            .unwrap();
+            let params = prepared.chat_request.sampling_params;
+            let selected = !ids.is_empty();
+            assert_eq!(params.logprob_token_ids, selected.then_some(ids));
+            assert_eq!(params.logprobs, (!selected).then_some(1));
+            assert_eq!(
+                prepared.options.output_top_logprobs,
+                if selected { -1 } else { 1 }
+            );
+        }
     }
 
     #[test]

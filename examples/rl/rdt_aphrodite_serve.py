@@ -76,7 +76,6 @@ def launch_aphrodite_serve(
     env = dict(
         os.environ,
         APHRODITE_SERVER_DEV_MODE="1",
-        APHRODITE_USE_RAY_V2_EXECUTOR_BACKEND="1",
     )
     # Pin the child to THIS Ray cluster. Aphrodite's ray DP backend reaches Ray
     # through a bare ``ray.init()``, which STARTS a cluster rather than

@@ -17,7 +17,8 @@ from aphrodite.v1.attention.backend import AttentionCGSupport
 from aphrodite.v1.core.sched.output import NewRequestData
 from aphrodite.v1.kv_cache_interface import KVCacheConfig
 from aphrodite.v1.worker.encoder_cudagraph import EncoderCudaGraphManager
-from aphrodite.v1.worker.gpu.input_batch import InputBatch
+from aphrodite.v1.worker.gpu.block_table import BlockTables
+from aphrodite.v1.worker.gpu.input_batch import InputBatch, InputBuffers
 from aphrodite.v1.worker.gpu.mm.encoder_cache import EncoderCache
 from aphrodite.v1.worker.gpu.mm.encoder_runner import EncoderRunner
 from aphrodite.v1.worker.gpu.states import RequestState
@@ -27,18 +28,10 @@ from aphrodite.v1.worker.utils import AttentionGroup
 class ModelSpecificAttnMetadata:
     """Base class for model-specific attention metadata."""
 
-    def get_extra_common_attn_kwargs(
-        self,
-        kv_cache_group_id: int,
-        num_reqs: int,
-    ) -> dict[str, Any]:
+    def get_extra_common_attn_kwargs(self, kv_cache_group_id: int, num_reqs: int) -> dict[str, Any]:
         return {}
 
-    def get_extra_attn_kwargs(
-        self,
-        attn_metadata_builder: Any,
-        num_reqs: int,
-    ) -> dict[str, Any]:
+    def get_extra_attn_kwargs(self, attn_metadata_builder: Any, num_reqs: int) -> dict[str, Any]:
         return {}
 
 
@@ -59,7 +52,6 @@ class ModelState(ABC):
         self.model = model
         self.device = device
 
-        self.max_model_len = self.model_config.max_model_len
         self.max_num_reqs = self.scheduler_config.max_num_seqs
         self.max_num_tokens = self.scheduler_config.max_num_batched_tokens
         self.inputs_embeds_size = self.model_config.get_inputs_embeds_size()
@@ -96,6 +88,11 @@ class ModelState(ABC):
                 enable_timing=bool(observability_config and observability_config.enable_mm_processor_stats),
             )
 
+    @property
+    def max_model_len(self) -> int:
+        # Auto-fit can reduce the limit after model state initialization.
+        return self.model_config.max_model_len
+
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
         from aphrodite.model_executor.models.interfaces import (
             supports_realtime,
@@ -121,6 +118,20 @@ class ModelState(ABC):
         return None
 
     def apply_staged_writes(self) -> None:
+        return None
+
+    def initialize_kv_cache(self, kv_cache_config: KVCacheConfig, block_tables: BlockTables) -> None:
+        """Hook run after the KV cache tensors are allocated and bound."""
+        return None
+
+    def capture_inner_cudagraphs(
+        self,
+        input_buffers: InputBuffers,
+        block_tables: BlockTables,
+        attn_groups: list[list[AttentionGroup]],
+        kv_cache_config: KVCacheConfig,
+    ) -> None:
+        """Capture the CUDA graphs this state runs inside the model's forward."""
         return None
 
     def get_additional_cg_support(self) -> tuple[AttentionCGSupport, str | None]:

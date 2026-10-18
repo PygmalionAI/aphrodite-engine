@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 
 from aphrodite.entrypoints.serve.engine.protocol import ErrorInfo, ErrorResponse
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 
 from ..utils import sanitize_message
@@ -158,7 +158,7 @@ async def validation_exception_handler(req: Request, exc: RequestValidationError
     for error in errors:
         if "ctx" in error and "error" in error["ctx"]:
             ctx_error = error["ctx"]["error"]
-            if isinstance(ctx_error, APHRODITEValidationError):
+            if isinstance(ctx_error, AphroditeValidationError):
                 param = ctx_error.parameter
                 break
 

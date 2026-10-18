@@ -36,8 +36,7 @@ from .utils import (
 
 
 class DeepseekV2Eagle3DecoderLayer(nn.Module):
-    """
-    Eagle3 decoder layer for Deepseek that:
+    """Eagle3 decoder layer for Deepseek that:
     1. Always uses MLP (not MoE)
     2. First layer accepts concatenated embeds + hidden_states
     """
@@ -292,10 +291,14 @@ class Eagle3DeepseekV2ForCausalLM(LocalArgmaxMixin, DeepseekV2ForCausalLM):
             prefix=maybe_prefix(prefix, "lm_head"),
         )
         self.logits_processor = LogitsProcessor(self.config.draft_vocab_size, scale=logit_scale)
-        self.draft_id_to_target_id = nn.Parameter(
-            torch.zeros(self.config.draft_vocab_size, dtype=torch.long),
-            requires_grad=False,
-        )
+        target_vocab_size = aphrodite_config.model_config.get_vocab_size()
+        if self.config.draft_vocab_size != target_vocab_size:
+            self.draft_id_to_target_id = nn.Parameter(
+                torch.zeros(self.config.draft_vocab_size, dtype=torch.long),
+                requires_grad=False,
+            )
+        else:
+            self.draft_id_to_target_id = None
 
     def embed_input_ids(
         self,

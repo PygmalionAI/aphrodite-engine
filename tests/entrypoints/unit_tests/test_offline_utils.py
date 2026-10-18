@@ -4,8 +4,8 @@
 import pytest
 
 from aphrodite import SamplingParams
-from aphrodite.entrypoints.offline_utils import OfflineInferenceMixin
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.entrypoints.common.offline import OfflineInferenceMixin
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.lora.request import LoRARequest
 
 
@@ -15,7 +15,7 @@ def mixin() -> OfflineInferenceMixin:
 
 
 def test_rejects_mismatched_params(mixin: OfflineInferenceMixin):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         mixin._params_to_seq([SamplingParams()], num_requests=2)
 
     assert str(exc_info.value) == ("The lengths of prompts (2) and params (1) must be the same.")
@@ -24,7 +24,7 @@ def test_rejects_mismatched_params(mixin: OfflineInferenceMixin):
 
 
 def test_rejects_mismatched_lora_requests(mixin: OfflineInferenceMixin):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         mixin._lora_request_to_seq([None], num_requests=2)
 
     assert str(exc_info.value) == ("The lengths of prompts (2) and lora_request (1) must be the same.")
@@ -33,7 +33,7 @@ def test_rejects_mismatched_lora_requests(mixin: OfflineInferenceMixin):
 
 
 def test_rejects_mismatched_priority(mixin: OfflineInferenceMixin):
-    with pytest.raises(APHRODITEValidationError) as exc_info:
+    with pytest.raises(AphroditeValidationError) as exc_info:
         mixin._priority_to_seq([0], num_requests=2)
 
     assert str(exc_info.value) == ("The lengths of prompts (2) and priority (1) must be the same.")
@@ -47,3 +47,9 @@ def test_matching_lengths_pass_through(mixin: OfflineInferenceMixin):
     assert mixin._params_to_seq([SamplingParams()], num_requests=1) == [SamplingParams()]
     assert mixin._lora_request_to_seq([lora], num_requests=1) == [lora]
     assert mixin._priority_to_seq([3], num_requests=1) == [3]
+
+
+def test_scalar_priority_broadcast(mixin: OfflineInferenceMixin):
+    assert mixin._priority_to_seq(5, num_requests=1) == [5]
+    assert mixin._priority_to_seq(5, num_requests=3) == [5, 5, 5]
+    assert mixin._priority_to_seq(None, num_requests=3) == [0, 0, 0]

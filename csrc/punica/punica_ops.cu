@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "type_convert.h"
-#include "../cuda_compat.h"
+#include "../core/cuda_compat.h"
 
 #include "bgmv/bgmv_config.h"
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""The CLI entrypoints of Aphrodite
+"""The CLI entrypoints of Aphrodite.
 
 Note that all future modules must be lazily loaded within main
 to avoid certain eager import breakage."""
@@ -8,7 +8,7 @@ to avoid certain eager import breakage."""
 import importlib.metadata
 import sys
 
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_from_args, init_logger
 
 logger = init_logger(__name__)
 
@@ -16,11 +16,14 @@ logger = init_logger(__name__)
 def main():
     import aphrodite.entrypoints.cli.benchmark.main
     import aphrodite.entrypoints.cli.collect_env
+    import aphrodite.entrypoints.cli.download_kernels
     import aphrodite.entrypoints.cli.launch
     import aphrodite.entrypoints.cli.openai
+    import aphrodite.entrypoints.cli.preload
     import aphrodite.entrypoints.cli.run
     import aphrodite.entrypoints.cli.run_batch
     import aphrodite.entrypoints.cli.serve
+    import aphrodite.entrypoints.cli.snapshot
     from aphrodite.entrypoints.serve.utils.api_utils import (
         APHRODITE_SUBCMD_PARSER_EPILOG,
         cli_env_setup,
@@ -34,10 +37,14 @@ def main():
         aphrodite.entrypoints.cli.launch,
         aphrodite.entrypoints.cli.benchmark.main,
         aphrodite.entrypoints.cli.collect_env,
+        aphrodite.entrypoints.cli.download_kernels,
+        aphrodite.entrypoints.cli.preload,
         aphrodite.entrypoints.cli.run_batch,
+        aphrodite.entrypoints.cli.snapshot,
     ]
 
-    cli_env_setup()
+    if sys.argv[1:2] != ["snapshot"]:
+        cli_env_setup()
 
     aphrodite.entrypoints.cli.benchmark.main.maybe_exec_rust_bench()
 
@@ -68,13 +75,18 @@ def main():
     subparsers = parser.add_subparsers(required=False, dest="subparser")
     cmds = {}
     for cmd_module in CMD_MODULES:
-        new_cmds = cmd_module.cmd_init()
+        if cmd_module is aphrodite.entrypoints.cli.snapshot:
+            new_cmds = cmd_module.cmd_init(create_requested=sys.argv[1:3] == ["snapshot", "create"])
+        else:
+            new_cmds = cmd_module.cmd_init()
         for cmd in new_cmds:
             cmd.subparser_init(subparsers).set_defaults(dispatch_function=cmd.cmd)
             cmds[cmd.name] = cmd
     args = parser.parse_args()
     if args.subparser in cmds:
-        cmds[args.subparser].validate(args)
+        cmd = cmds[args.subparser]
+        configure_logging_from_args(args)
+        cmd.validate(args)
 
     if hasattr(args, "dispatch_function"):
         args.dispatch_function(args)

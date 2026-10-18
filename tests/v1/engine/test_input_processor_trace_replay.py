@@ -9,7 +9,7 @@ import pytest
 
 from aphrodite import SamplingParams
 from aphrodite.config import AphroditeConfig
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.v1.core.sched.utils import check_stop
 from aphrodite.v1.engine.input_processor import InputProcessor
 from aphrodite.v1.request import Request, RequestStatus
@@ -78,11 +78,19 @@ def _validate(enable_trace_replay: bool) -> None:
         model_config=SimpleNamespace(
             return_sampling_mask=False,
             enable_trace_replay=enable_trace_replay,
+            is_diffusion=False,
         ),
-        aphrodite_config=SimpleNamespace(reasoning_config=None),
+        aphrodite_config=SimpleNamespace(
+            reasoning_config=None,
+            # Engine has no watermark configuration.
+            _check_supports_watermarking=lambda params: False,
+        ),
+        resolve_watermarking=lambda params: False,
         speculative_config=None,
         structured_outputs_config=None,
+        diffusion_config=None,
         tokenizer=None,
+        validate_logits_processors_params=lambda params: None,
     )
     params = SamplingParams(trace_decode_token_ids=[1, 2, 3])
     with patch.object(SamplingParams, "verify"):
@@ -90,7 +98,7 @@ def _validate(enable_trace_replay: bool) -> None:
 
 
 def test_trace_request_rejected_when_feature_disabled():
-    with pytest.raises(APHRODITEValidationError, match="--enable-trace-replay"):
+    with pytest.raises(AphroditeValidationError, match="--enable-trace-replay"):
         _validate(enable_trace_replay=False)
 
 

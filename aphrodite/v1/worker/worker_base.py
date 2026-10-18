@@ -12,7 +12,7 @@ from aphrodite.config import AphroditeConfig, set_current_aphrodite_config
 from aphrodite.distributed.kv_transfer.kv_connector.utils import get_current_attn_backends
 from aphrodite.logger import init_logger
 from aphrodite.lora.request import LoRARequest
-from aphrodite.multimodal import MULTIMODAL_REGISTRY
+from aphrodite.multimodal.cache import worker_receiver_cache_from_config
 from aphrodite.tracing import instrument
 from aphrodite.utils.import_utils import resolve_obj_by_qualname
 from aphrodite.utils.system_utils import update_environment_variables
@@ -55,8 +55,7 @@ class WorkerBase:
         distributed_init_method: str,
         is_driver_worker: bool = False,
     ) -> None:
-        """
-        Initialize common worker components.
+        """Initialize common worker components.
 
         Args:
             aphrodite_config: Complete Aphrodite configuration
@@ -65,6 +64,7 @@ class WorkerBase:
             distributed_init_method: Distributed initialization method
             is_driver_worker: Whether this worker handles driver
                 responsibilities
+
         """
         self.aphrodite_config = aphrodite_config
         self.model_config = aphrodite_config.model_config
@@ -116,6 +116,7 @@ class WorkerBase:
 
         Returns:
             Compilation times (language_model, encoder) in seconds.
+
         """
         raise NotImplementedError
 
@@ -139,6 +140,11 @@ class WorkerBase:
         reset_fn = getattr(self.model_runner, "reset_mm_cache", None)
         if callable(reset_fn):
             reset_fn()
+
+    def release_late_interaction_query_cache(self, query_keys: list[str]) -> None:
+        release_fn = getattr(self.model_runner, "release_late_interaction_query_cache", None)
+        if callable(release_fn):
+            release_fn(query_keys)
 
     def get_model(self) -> nn.Module:
         raise NotImplementedError
@@ -203,8 +209,7 @@ class WorkerBase:
 
 
 class WorkerWrapperBase:
-    """
-    This class represents one process in an executor/engine. It is responsible
+    """This class represents one process in an executor/engine. It is responsible
     for lazily initializing the worker and handling the worker's lifecycle.
     We first instantiate the WorkerWrapper, which remembers the worker module
     and class name. Then, when we call `update_environment_variables`, and the
@@ -216,8 +221,7 @@ class WorkerWrapperBase:
         rpc_rank: int = 0,
         global_rank: int | None = None,
     ) -> None:
-        """
-        Initialize the worker wrapper with the given aphrodite_config and rpc_rank.
+        """Initialize the worker wrapper with the given aphrodite_config and rpc_rank.
         Note: rpc_rank is the rank of the worker in the executor. In most cases,
         it is also the rank of the worker in the distributed group. However,
         when multiple executors work together, they can be different.
@@ -232,9 +236,17 @@ class WorkerWrapperBase:
         # Initialized after init_worker is called
         self.worker: WorkerBase
         self.aphrodite_config: AphroditeConfig
+        self._worker_extension_cls: type | None = None
 
     def shutdown(self) -> None:
         if self.worker is not None:
+            hook = getattr(self._worker_extension_cls, "destroy_worker_extension", None)
+            if callable(hook):
+                try:
+                    hook(self.worker)
+                except Exception:
+                    # Don't raise: callers still need to run their own teardown.
+                    logger.exception("Worker extension destroy hook failed.")
             self.worker.shutdown()
 
     def update_environment_variables(
@@ -246,8 +258,7 @@ class WorkerWrapperBase:
 
     @instrument(span_name="Worker init")
     def init_worker(self, all_kwargs: list[dict[str, Any]]) -> None:
-        """
-        Here we inject some common logic before initializing the worker.
+        """Here we inject some common logic before initializing the worker.
         Arguments are passed to the worker class constructor.
         """
         kwargs = all_kwargs[self.rpc_rank]
@@ -262,6 +273,12 @@ class WorkerWrapperBase:
 
         load_general_plugins()
 
+        # Let the platform replace core Triton kernels (e.g. CPU fallback
+        # implementations) before any worker or model code can launch them.
+        from aphrodite.platforms import current_platform
+
+        current_platform.register_triton_kernel_overrides()
+
         parallel_config = aphrodite_config.parallel_config
         if isinstance(parallel_config.worker_cls, str):
             worker_class: type[WorkerBase] = resolve_obj_by_qualname(parallel_config.worker_cls)
@@ -272,6 +289,7 @@ class WorkerWrapperBase:
                 "and pass the qualified name of the class as a string."
             )
 
+        worker_extension_cls: type | None = None
         if parallel_config.worker_extension_cls:
             worker_extension_cls = resolve_obj_by_qualname(parallel_config.worker_extension_cls)
             extended_calls = []
@@ -301,28 +319,15 @@ class WorkerWrapperBase:
             aphrodite_config.parallel_config.assigned_physical_gpu_ids = assigned_physical_gpu_ids
 
         shared_worker_lock = kwargs.pop("shared_worker_lock", None)
-        if shared_worker_lock is None:
-            msg = (
-                "Missing `shared_worker_lock` argument from executor. "
-                "This argument is needed for mm_processor_cache_type='shm'."
-            )
-
-            mm_config = aphrodite_config.model_config.multimodal_config
-            if mm_config and mm_config.mm_processor_cache_type == "shm":
-                raise ValueError(msg)
-            else:
-                logger.warning_once(msg)
-
-            self.mm_receiver_cache = None
-        else:
-            self.mm_receiver_cache = MULTIMODAL_REGISTRY.worker_receiver_cache_from_config(
-                aphrodite_config,
-                shared_worker_lock,
-            )
+        self.mm_receiver_cache = worker_receiver_cache_from_config(
+            aphrodite_config,
+            shared_worker_lock,
+        )
 
         with set_current_aphrodite_config(self.aphrodite_config):
             # To make Aphrodite config available during worker initialization
             self.worker = worker_class(**kwargs)
+            self._worker_extension_cls = worker_extension_cls
 
     def initialize_from_config(self, kv_cache_configs: list[Any]) -> None:
         kv_cache_config = kv_cache_configs[self.global_rank]
@@ -335,6 +340,9 @@ class WorkerWrapperBase:
         with set_current_aphrodite_config(self.aphrodite_config):
             # To make Aphrodite config available during device initialization
             self.worker.init_device()  # type: ignore
+            hook = getattr(self._worker_extension_cls, "init_worker_extension", None)
+            if callable(hook):
+                hook(self.worker)
 
     def __getattr__(self, attr: str):
         return getattr(self.worker, attr)

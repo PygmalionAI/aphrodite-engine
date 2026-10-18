@@ -5,34 +5,26 @@ import torch
 _SAMPLING_EPS = 1e-5
 
 
-def _tensor_or_zeros(tens, like_tensor):
-    return tens if tens is not None else torch.zeros_like(like_tensor)
-
-
 def apply_all_temperatures(
     logits: torch.Tensor,
     sampling_metadata,
 ) -> torch.Tensor:
     temp = sampling_metadata.temperature
-    dynatemp_mins = _tensor_or_zeros(sampling_metadata.dynatemp_min, temp)
-    dynatemp_maxs = _tensor_or_zeros(sampling_metadata.dynatemp_max, temp)
-    dynatemp_exps = _tensor_or_zeros(sampling_metadata.dynatemp_exp, temp)
+    if sampling_metadata.dynatemp_min is not None and sampling_metadata.dynatemp_max is not None:
+        mins = sampling_metadata.dynatemp_min
+        maxs = sampling_metadata.dynatemp_max
+        exps = sampling_metadata.dynatemp_exp
+        assert exps is not None
+        logprobs = logits.log_softmax(dim=-1)
+        entropies = -(logprobs.exp() * logprobs).nansum(dim=-1)
+        max_entropies = (logits > float("-inf")).sum(dim=-1).float().log_()
+        normalized = torch.where(max_entropies > 0, entropies / max_entropies, 0.0)
+        dynamic = mins + (maxs - mins) * normalized.pow(exps)
+        temp = torch.where((mins != 0) | (maxs != 0), dynamic, temp)
 
-    dynatemp_mask = (dynatemp_mins != 0) | (dynatemp_maxs != 0)
-    dynatemp_mins = dynatemp_mins[dynatemp_mask]
-    dynatemp_maxs = dynatemp_maxs[dynatemp_mask]
-    dynatemp_exps = dynatemp_exps[dynatemp_mask]
-
-    dynatemp_logits = logits[dynatemp_mask]
-    dynatemp_shifted_logits = torch.log_softmax(dynatemp_logits, dim=-1)
-    dynatemp_probs = dynatemp_shifted_logits.exp()
-    dynatemp_entropies = -(dynatemp_probs * dynatemp_shifted_logits).nansum(dim=-1)
-    dynatemp_max_entropies = torch.log_((dynatemp_logits > float("-inf")).sum(dim=-1).float())
-    normalized_entropies = dynatemp_entropies.div_(dynatemp_max_entropies)
-    dyn_temp = dynatemp_mins + (dynatemp_maxs - dynatemp_mins) * normalized_entropies.pow_(dynatemp_exps)
-    temp[dynatemp_mask] = dyn_temp
-
-    temp[temp.isnan()] = _SAMPLING_EPS
-    temp[temp <= _SAMPLING_EPS] = _SAMPLING_EPS
-    # Use in-place division to avoid creating a new tensor.
-    return logits.div_(temp.unsqueeze(dim=1))
+    # Do not mutate request temperatures: greedy/random selection happens later,
+    # and temperature storage is reused across steps.
+    temp = torch.nan_to_num(temp, nan=_SAMPLING_EPS).clamp_min(_SAMPLING_EPS)
+    if not sampling_metadata.all_random:
+        temp = torch.where(sampling_metadata.temperature < _SAMPLING_EPS, 1.0, temp)
+    return logits.div_(temp.unsqueeze(-1))

@@ -66,7 +66,6 @@ MESSAGES = [
 def test_mtp_speculative_mixed_batch_short_prefill(aphrodite_runner, model_name, enable_prefix_caching):
     """Test to ensure MTP speculative decoding correctly handles
     short prefill chunks that fall below the reorder_batch_threshold."""
-
     # Set so large that both prefills will be classified as decodes in a mixed batch
     # note, with prefix caching we require chunk_size >= mamba_block_size
     chunk_size = 256 if not enable_prefix_caching else 2048
@@ -87,7 +86,6 @@ def test_mtp_speculative_mixed_batch_short_prefill(aphrodite_runner, model_name,
         trust_remote_code=True,
         enable_chunked_prefill=True,
         enable_prefix_caching=enable_prefix_caching,
-        mamba_cache_mode="align" if enable_prefix_caching else "none",
     ) as llm:
         sampling_params = SamplingParams(
             temperature=0.0,
@@ -153,7 +151,6 @@ def test_qwen_mtp_mamba_prefix_cache_hit_is_bounded(aphrodite_runner, monkeypatc
         enforce_eager=True,
         enable_chunked_prefill=True,
         enable_prefix_caching=True,
-        mamba_cache_mode="align",
         speculative_config={"method": "mtp", "num_speculative_tokens": 2},
     ) as runner:
         llm = runner.get_llm()

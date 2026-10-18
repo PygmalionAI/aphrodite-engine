@@ -32,6 +32,7 @@ from aphrodite.config import AphroditeConfig, CacheConfig
 from aphrodite.distributed import get_pp_group, get_tensor_model_parallel_world_size
 from aphrodite.model_executor.layers.activation import get_act_fn
 from aphrodite.model_executor.layers.attention import Attention
+from aphrodite.model_executor.layers.layernorm import LayerNorm
 from aphrodite.model_executor.layers.linear import (
     ColumnParallelLinear,
     QKVParallelLinear,
@@ -143,9 +144,7 @@ class OPTDecoderLayer(nn.Module):
         )
         self.do_layer_norm_before = config.do_layer_norm_before
 
-        self.self_attn_layer_norm = nn.LayerNorm(
-            self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine
-        )
+        self.self_attn_layer_norm = LayerNorm(self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine)
         self.fc1 = ColumnParallelLinear(
             self.embed_dim,
             config.ffn_dim,
@@ -161,7 +160,7 @@ class OPTDecoderLayer(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.fc2",
         )
-        self.final_layer_norm = nn.LayerNorm(self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine)
+        self.final_layer_norm = LayerNorm(self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine)
 
     def forward(
         self,
@@ -214,6 +213,7 @@ class OPTDecoder(nn.Module):
         self.embed_positions = OPTLearnedPositionalEmbedding(config.max_position_embeddings, config.hidden_size)
 
         # Project out & in will be replicated if they exist.
+        self.project_out: ReplicatedLinear | None
         if config.word_embed_proj_dim != config.hidden_size:
             self.project_out = ReplicatedLinear(
                 config.hidden_size,
@@ -225,6 +225,7 @@ class OPTDecoder(nn.Module):
         else:
             self.project_out = None
 
+        self.project_in: ReplicatedLinear | None
         if config.word_embed_proj_dim != config.hidden_size:
             self.project_in = ReplicatedLinear(
                 config.word_embed_proj_dim,
@@ -240,8 +241,9 @@ class OPTDecoder(nn.Module):
         # keep backward compatibility with checkpoints that have been fine-tuned
         # before transformers v4.20.1
         # see https://github.com/facebookresearch/metaseq/pull/164
+        self.final_layer_norm: LayerNorm | None
         if config.do_layer_norm_before and not config._remove_final_layer_norm:
-            self.final_layer_norm = nn.LayerNorm(
+            self.final_layer_norm = LayerNorm(
                 config.hidden_size,
                 elementwise_affine=config.layer_norm_elementwise_affine,
             )

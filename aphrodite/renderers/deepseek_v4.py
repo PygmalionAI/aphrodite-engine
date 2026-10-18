@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from aphrodite.config import AphroditeConfig
-from aphrodite.entrypoints.chat_utils import (
+from aphrodite.renderers.chat_utils import (
     ChatCompletionMessageParam,
     ConversationMessage,
     parse_chat_messages,
@@ -15,6 +15,10 @@ from .base import BaseRenderer
 from .inputs import DictPrompt
 from .inputs.preprocess import parse_dec_only_prompt
 from .params import ChatParams
+
+_FIM_BEGIN = "<｜fim▁begin｜>"
+_FIM_HOLE = "<｜fim▁hole｜>"
+_FIM_END = "<｜fim▁end｜>"
 
 
 class DeepseekV4Renderer(BaseRenderer[DeepseekV4Tokenizer]):
@@ -30,6 +34,9 @@ class DeepseekV4Renderer(BaseRenderer[DeepseekV4Tokenizer]):
     def _apply_chat_template(self, *args, **kwargs):
         return self.get_tokenizer().apply_chat_template(*args, **kwargs)
 
+    def render_completion_suffix(self, prompt: str, suffix: str) -> str | None:
+        return f"{_FIM_BEGIN}{prompt}{_FIM_HOLE}{suffix}{_FIM_END}"
+
     def render_messages(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -38,7 +45,7 @@ class DeepseekV4Renderer(BaseRenderer[DeepseekV4Tokenizer]):
         conversation, mm_data, mm_uuids = parse_chat_messages(
             messages,
             self.model_config,
-            content_format="string",
+            content_format="openai",
             media_io_kwargs=params.media_io_kwargs,
             mm_processor_kwargs=params.mm_processor_kwargs,
         )
@@ -65,7 +72,7 @@ class DeepseekV4Renderer(BaseRenderer[DeepseekV4Tokenizer]):
         conversation, mm_data, mm_uuids = await parse_chat_messages_async(
             messages,
             self.model_config,
-            content_format="string",
+            content_format="openai",
             media_io_kwargs=params.media_io_kwargs,
             mm_processor_kwargs=params.mm_processor_kwargs,
         )

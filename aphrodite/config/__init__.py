@@ -9,7 +9,8 @@ from aphrodite.config.aphrodite import (
     get_layers_from_aphrodite_config,
     set_current_aphrodite_config,
 )
-from aphrodite.config.attention import AttentionConfig
+from aphrodite.config.attention import AttentionConfig, HiSparseConfig
+from aphrodite.config.aux_output import AuxOutputConfig
 from aphrodite.config.cache import CacheConfig
 from aphrodite.config.compilation import (
     CompilationConfig,
@@ -21,11 +22,13 @@ from aphrodite.config.device import DeviceConfig
 from aphrodite.config.diffusion import DiffusionConfig
 from aphrodite.config.ec_manager_config import EncoderCacheManagerConfig
 from aphrodite.config.ec_transfer import ECTransferConfig
+from aphrodite.config.engram import EngramConfig
 from aphrodite.config.fault_tolerance import FaultToleranceConfig
 from aphrodite.config.kernel import KernelConfig
 from aphrodite.config.kv_events import KVEventsConfig
 from aphrodite.config.kv_transfer import KVTransferConfig
 from aphrodite.config.load import LoadConfig
+from aphrodite.config.logging import LoggingConfig
 from aphrodite.config.lora import LoRAConfig
 from aphrodite.config.mamba import MambaConfig
 from aphrodite.config.model import (
@@ -59,13 +62,17 @@ from aphrodite.config.utils import (
     replace,
     update_config,
 )
+from aphrodite.config.watermarking import WatermarkConfig
 from aphrodite.config.weight_transfer import WeightTransferConfig
 
 # __all__ should only contain classes and functions.
 # Types and globals should be imported from their respective modules.
 __all__ = [
+    # From aphrodite.config.aux_output
+    "AuxOutputConfig",
     # From aphrodite.config.attention
     "AttentionConfig",
+    "HiSparseConfig",
     # From aphrodite.config.cache
     "CacheConfig",
     # From aphrodite.config.compilation
@@ -81,6 +88,8 @@ __all__ = [
     "EncoderCacheManagerConfig",
     # From aphrodite.config.ec_transfer
     "ECTransferConfig",
+    # From aphrodite.config.engram
+    "EngramConfig",
     # From aphrodite.config.kernel
     "KernelConfig",
     # From aphrodite.config.kv_events
@@ -89,6 +98,8 @@ __all__ = [
     "KVTransferConfig",
     # From aphrodite.config.load
     "LoadConfig",
+    # From aphrodite.config.logging
+    "LoggingConfig",
     # From aphrodite.config.lora
     "LoRAConfig",
     # From aphrodite.config.mamba
@@ -143,4 +154,5 @@ __all__ = [
     "set_current_aphrodite_config",
     "get_layers_from_aphrodite_config",
     "WeightTransferConfig",
+    "WatermarkConfig",
 ]

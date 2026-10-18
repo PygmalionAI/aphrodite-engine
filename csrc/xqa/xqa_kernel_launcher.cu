@@ -21,8 +21,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/all.h>
-#include "attention/attention_dtypes.h"
-#include "cuda_compat.h"
+#include "core/vec_dtypes/vec_dtypes.h"
+#include "core/cuda_compat.h"
 #include "dispatch_utils.h"
 #include "decoder_xqa_impl_precompiled.h"
 #include "decoder_xqa_runner.h"

@@ -92,6 +92,23 @@ Sonar includes `NixlConnector` for asynchronous KV cache transfer. Install NIXL
 and its required transport for the target network. Configure one unique side
 channel address for each engine.
 
+From a Sonar source checkout, activate the serving environment and install the
+connector dependencies:
+
+```bash
+bash tools/install_kv_connectors.sh
+```
+
+The script keeps the installed PyTorch and CUDA packages. It selects the NIXL
+and Mooncake distributions for that CUDA version. CUDA 13 needs
+`mooncake-transfer-engine-cuda13`, not the CUDA 12 distribution.
+
+If you use the optional KVCR offload tier, install its pinned dependencies:
+
+```bash
+bash tools/install_kv_offload.sh
+```
+
 Start a prefill instance:
 
 ```bash

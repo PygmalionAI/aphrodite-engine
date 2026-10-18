@@ -284,8 +284,9 @@ mod tests {
     }
 
     fn read_aphrodite_example(relative_path: &str) -> String {
-        fs::read_to_string(aphrodite_examples_dir().join(relative_path))
-            .unwrap_or_else(|_| panic!("failed to read Aphrodite example template: {relative_path}"))
+        fs::read_to_string(aphrodite_examples_dir().join(relative_path)).unwrap_or_else(|_| {
+            panic!("failed to read Aphrodite example template: {relative_path}")
+        })
     }
 
     fn iter_aphrodite_example_template_paths() -> impl Iterator<Item = PathBuf> {

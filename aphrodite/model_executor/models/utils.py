@@ -32,15 +32,17 @@ from aphrodite.utils.torch_utils import (
 )
 
 if TYPE_CHECKING:
-    from transformers import PretrainedConfig
+    from transformers import PreTrainedConfig
     from transformers.conversion_mapping import WeightRenaming
 
-    from aphrodite.config.model import ModelConfig
     from aphrodite.model_executor.layers.quantization import QuantizationConfig
 
 logger = init_logger(__name__)
 
 ShardId: TypeAlias = str | int | tuple[int, ...]
+"""One shard of a stacked parameter. A tuple is a single contiguous span."""
+ShardIds: TypeAlias = ShardId | list[ShardId]
+"""One shard, or a list of shards the same weight is loaded into in turn."""
 
 
 @dataclass
@@ -52,7 +54,7 @@ class WeightsMapper:
     orig_to_new_renaming: list["WeightRenaming"] = field(default_factory=list)
     orig_to_new_regex: Mapping[re.Pattern, str | None] = field(default_factory=dict)
     orig_to_new_substr: Mapping[str, str | None] = field(default_factory=dict)
-    orig_to_new_stacked: Mapping[str, tuple[str, ShardId]] = field(default_factory=dict)
+    orig_to_new_stacked: Mapping[str, tuple[str, ShardIds]] = field(default_factory=dict)
     orig_to_new_prefix: Mapping[str, str | None] = field(default_factory=dict)
     orig_to_new_suffix: Mapping[str, str | None] = field(default_factory=dict)
 
@@ -73,17 +75,23 @@ class WeightsMapper:
             orig_to_new_suffix={**self.orig_to_new_suffix, **other.orig_to_new_suffix},
         )
 
-    def _map_name(self, key: str) -> str | None:
-        """Map a weight name (backward-compatible wrapper that discards shard_id)."""
+    def map_name(self, key: str) -> str | None:
+        """Map a weight name; returns ``None`` if the weight should be ignored."""
         result = self._map_name_with_shard(key)
         return result[0] if result is not None else None
 
-    def _map_name_with_shard(self, key: str) -> tuple[str, ShardId | None] | None:
+    def _map_name(self, key: str) -> str | None:
+        """Backward-compatible alias for :meth:`map_name`."""
+        return self.map_name(key)
+
+    def _map_name_with_shard(self, key: str) -> tuple[str, ShardIds | None] | None:
         """Map a weight name and extract any shard_id metadata.
 
         Returns:
-            (mapped_name, shard_id) if the name should be kept.
+            (mapped_name, shard_id) if the name should be kept. A list of shard
+            ids means the weight is loaded into each of those shards in turn.
             None if the name should be dropped.
+
         """
         # Deprecation warnings
         if key.endswith(".kv_scale"):
@@ -112,7 +120,7 @@ class WeightsMapper:
 
                 key = key.replace(substr, new_key, 1)
 
-        shard_id: ShardId | None = None
+        shard_id: ShardIds | None = None
         for substr, (new_key, new_shard_id) in self.orig_to_new_stacked.items():
             if substr in key:
                 key = key.replace(substr, new_key, 1)
@@ -140,9 +148,16 @@ class WeightsMapper:
             if result is None:
                 continue
             out_name, shard_id = result
-            if shard_id is not None:
-                data.shard_id = shard_id
-            yield out_name, data
+            if shard_id is None:
+                yield out_name, data
+                continue
+            shard_ids = shard_id if isinstance(shard_id, list) else [shard_id]
+            for i, one_shard_id in enumerate(shard_ids):
+                # Each shard carries its own id, so extra shards need their own
+                # tensor object; `detach` aliases the storage instead of copying.
+                shard_data = data if i == 0 else data.detach()
+                shard_data.shard_id = one_shard_id
+                yield out_name, shard_data
 
     def apply_list(self, values: list[str]) -> list[str]:
         return [out_name for name in values if (out_name := self._map_name(name)) is not None]
@@ -187,7 +202,7 @@ def _get_tied_embedding_params(module: nn.Module) -> dict[str, str]:
 
 
 def model_should_use_tied_lm_head(
-    config: "PretrainedConfig",
+    config: "PreTrainedConfig",
     quant_config: "QuantizationConfig | None",
 ) -> bool:
     """Return whether the model should tie lm_head to input embeddings.
@@ -212,8 +227,7 @@ def model_should_use_tied_lm_head(
 
 
 class AutoWeightsLoader:
-    """
-    Helper class to load weights into a [`torch.nn.Module`][]. It is able
+    """Helper class to load weights into a [`torch.nn.Module`][]. It is able
     to automatically detect child modules and parameters while iterating over
     the weights only once.
 
@@ -313,6 +327,21 @@ class AutoWeightsLoader:
                     f"Attempted to load nested weight {weight_qualname!r} into a single parameter {base_prefix!r}"
                 )
 
+            if param.dtype != weight_data.dtype:
+                # An exact widening -- an fp32 accumulator reading a bf16
+                # table, say -- keeps every stored value, so it is a debug
+                # line. Every other mismatch still warns.
+                exact_widening = weight_data.dtype in (
+                    torch.float16,
+                    torch.bfloat16,
+                    torch.float32,
+                ) and param.dtype in (torch.float32, torch.float64)
+                (logger.debug if exact_widening else logger.warning)(
+                    "Attempted to load weight %s with dtype %s into parameter with dtype %s",
+                    weight_qualname,
+                    weight_data.dtype,
+                    param.dtype,
+                )
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, weight_data)
 
@@ -321,13 +350,12 @@ class AutoWeightsLoader:
             yield weight_qualname
 
     def _add_loadable_non_param_tensors(self, module: nn.Module, child_params: dict[str, torch.Tensor]):
-        """
-        Add tensor names that are not in the model params that may be in the
+        """Add tensor names that are not in the model params that may be in the
         safetensors, e.g., batch normalization stats and registered buffers.
         """
         # Add persistent registered buffers.
         # Non-persistent buffers are excluded, matching PyTorch state_dict().
-        non_persistent = getattr(module, "_non_persistent_buffers_set", set())
+        non_persistent: set[str] = getattr(module, "_non_persistent_buffers_set", set())
         for buf_name, buf in module.named_buffers(recurse=False):
             if buf_name not in child_params and buf_name not in non_persistent:
                 child_params[buf_name] = buf
@@ -430,8 +458,9 @@ class AutoWeightsLoader:
         modules = (self.module, *self.module.children())
         iterator = (m.quant_config for m in modules if hasattr(m, "quant_config"))
         if quant_config := next(iterator, None):
-            # Get mappings and ignore prefixes for KV cache quantization scales
+            # Apply mappings for quantization-specific checkpoint tensors.
             mapper |= quant_config.get_cache_scale_mapper()
+            mapper |= quant_config.get_checkpoint_weight_mapper()
             ignore_unexpected_suffixes = quant_config._ignore_unexpected_suffixes
             self.ignore_unexpected_suffixes.extend(ignore_unexpected_suffixes)
         mapper |= self.REMOVE_UNUSED_ROTARY_EMBEDS_MAPPER
@@ -510,8 +539,18 @@ def maybe_fuse_shared_experts(
             )
 
 
-def get_spec_layer_idx_from_weight_name(config: "ModelConfig", weight_name: str) -> int | None:
-    """Return the MTP layer index a weight belongs to, or None."""
+def get_spec_layer_idx_from_weight_name(config: "PreTrainedConfig", weight_name: str) -> int | None:
+    """Return the MTP layer index a weight belongs to, or None.
+
+    Args:
+        config: The model config; must expose `num_hidden_layers` and,  for MTP
+            checkpoints, `num_nextn_predict_layers`.
+        weight_name: Checkpoint weight name to classify.
+
+    Returns:
+        The absolute layer index for an MTP-layer weight, else None.
+
+    """
     if not (n := getattr(config, "num_nextn_predict_layers", 0)):
         return None
     base = config.num_hidden_layers
@@ -528,7 +567,7 @@ def get_spec_layer_idx_from_weight_name(config: "ModelConfig", weight_name: str)
 
 
 def skip_spec_layers(
-    weights: Iterable[tuple[str, torch.Tensor]], config: "ModelConfig"
+    weights: Iterable[tuple[str, torch.Tensor]], config: "PreTrainedConfig"
 ) -> Iterable[tuple[str, torch.Tensor]]:
     """Drop MTP spec-layer weights loaded by the MTP head, not the base model."""
     return ((name, weight) for name, weight in weights if get_spec_layer_idx_from_weight_name(config, name) is None)
@@ -538,11 +577,10 @@ def init_aphrodite_registered_model(
     aphrodite_config: AphroditeConfig,
     *,
     prefix: str = "",
-    hf_config: "PretrainedConfig | None" = None,
+    hf_config: "PreTrainedConfig | None" = None,
     architectures: list[str] | None = None,
 ) -> nn.Module:
-    """
-    Helper function to initialize an inner model registered to Aphrodite,
+    """Helper function to initialize an inner model registered to Aphrodite,
     based on the arguments passed to the outer Aphrodite model.
     """
     from aphrodite.model_executor.model_loader.utils import initialize_model
@@ -558,11 +596,11 @@ def init_aphrodite_registered_model(
 
 
 @overload
-def flatten_bn(x: torch.Tensor) -> torch.Tensor: ...
+def flatten_bn(x: list[torch.Tensor]) -> list[torch.Tensor]: ...
 
 
 @overload
-def flatten_bn(x: list[torch.Tensor]) -> list[torch.Tensor]: ...
+def flatten_bn(x: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
@@ -586,8 +624,7 @@ def flatten_bn(
     *,
     concat: bool = False,
 ) -> list[torch.Tensor] | torch.Tensor:
-    """
-    Flatten the `B` and `N` dimensions of batched multimodal inputs.
+    """Flatten the `B` and `N` dimensions of batched multimodal inputs.
 
     The input tensor should have shape `(B, N, ...)`.
     """
@@ -601,11 +638,9 @@ def flatten_bn(
 
 
 def _flatten_embeddings(embeddings: NestedTensors) -> torch.Tensor:
-    """
-    Recursively flattens and concatenates NestedTensors on all but the last
+    """Recursively flattens and concatenates NestedTensors on all but the last
     dimension.
     """
-
     if isinstance(embeddings, torch.Tensor):
         # Flatten all but the last dimension.
         return embeddings.flatten(0, -2)
@@ -614,11 +649,9 @@ def _flatten_embeddings(embeddings: NestedTensors) -> torch.Tensor:
 
 
 def _embedding_count_expression(embeddings: NestedTensors) -> str:
-    """
-    Constructs a debugging representation of the number of embeddings in the
+    """Constructs a debugging representation of the number of embeddings in the
     NestedTensors.
     """
-
     if isinstance(embeddings, torch.Tensor):
         return " x ".join([str(dim) for dim in embeddings.shape[:-1]])
 
@@ -638,13 +671,13 @@ def _merge_multimodal_embeddings(
     multimodal_embeddings: NestedTensors,
     is_multimodal: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Merge `multimodal_embeddings` into `inputs_embeds` by overwriting the
+    """Merge `multimodal_embeddings` into `inputs_embeds` by overwriting the
     positions in `inputs_embeds` corresponding to placeholder tokens in
     `input_ids`.
 
     Note:
         This updates `inputs_embeds` in place.
+
     """
     if len(multimodal_embeddings) == 0:
         return inputs_embeds
@@ -698,8 +731,7 @@ def collect_children(
     *,
     targets: type[nn.Module] | tuple[type[nn.Module], ...] | None = None,
 ):
-    """
-    Within this context, collect all direct child assignments to `module`,
+    """Within this context, collect all direct child assignments to `module`,
     returning a list of children names that is internally updated until the
     context is exited.
 
@@ -731,8 +763,7 @@ def no_init_weights(
     *,
     targets: type[nn.Module] | tuple[type[nn.Module], ...] | None = None,
 ):
-    """
-    Within this context, prevent weight initialization from using device memory and
+    """Within this context, prevent weight initialization from using device memory and
     replace direct child assignments to `module` with the result of `placeholder()`.
 
     If `targets` is set, instead prevent weight initialization and
@@ -771,9 +802,7 @@ class LayerFn(Protocol):
 
 
 class PPMissingLayer(torch.nn.Identity):
-    """
-    A placeholder layer for missing layers in a pipeline parallel model.
-    """
+    """A placeholder layer for missing layers in a pipeline parallel model."""
 
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -783,17 +812,22 @@ class PPMissingLayer(torch.nn.Identity):
         return args[0] if args else next(iter(kwargs.values()))
 
 
-def spec_decode_needs_target_embed(aphrodite_config: AphroditeConfig) -> bool:
-    """Whether the last PP rank needs the target input embedding."""
+def spec_decode_needs_target_embed(aphrodite_config: AphroditeConfig, *, include_mtp: bool = False) -> bool:
+    """Whether the last PP rank needs the target input embedding.
+
+    MTP targets opt in when their drafter supports sharing this embedding.
+    """
     from aphrodite.distributed.parallel_state import get_pp_group
 
     speculative_config = aphrodite_config.speculative_config
-    if speculative_config is None or speculative_config.method not in (
+    if speculative_config is None:
+        return False
+    if speculative_config.method not in (
         "eagle",
         "eagle3",
         "dflash",
         "dspark",
-    ):
+    ) and not (include_mtp and speculative_config.method == "mtp"):
         return False
     pp = get_pp_group()
     return pp.world_size > 1 and pp.is_last_rank
@@ -814,6 +848,7 @@ def make_layers(
 
     Returns:
         Tuple of (start_layer, end_layer, modules).
+
     """
     from aphrodite.distributed.parallel_state import get_pp_group
     from aphrodite.distributed.utils import get_pp_indices
@@ -882,6 +917,7 @@ def maybe_prefix(prefix: str, name: str) -> str:
 
     Returns:
         The string "prefix.name" if prefix was non-empty, otherwise just "name".
+
     """
     return name if not prefix else f"{prefix}.{name}"
 
@@ -897,8 +933,11 @@ def get_draft_quant_config(aphrodite_config: AphroditeConfig) -> "QuantizationCo
 
     Returns:
         The draft model's config if available, None otherwise.
+
     """
-    draft_model_config = aphrodite_config.speculative_config.draft_model_config
+    speculative_config = aphrodite_config.speculative_config
+    assert speculative_config is not None
+    draft_model_config = speculative_config.draft_model_config
     draft_load_config = aphrodite_config.load_config
 
     return (
@@ -907,13 +946,14 @@ def get_draft_quant_config(aphrodite_config: AphroditeConfig) -> "QuantizationCo
 
 
 def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
-    """
-    Extract the layer index from the module name.
+    """Extract the layer index from the module name.
+
     Examples:
     - "encoder.layers.0" -> 0
     - "encoder.layers.1.self_attn" -> 1
     - "2.self_attn" -> 2
     - "model.encoder.layers.0.sub.1" -> ValueError if num_attn_module == 1
+
     """
     subnames = layer_name.split(".")
     int_vals: list[int] = []
@@ -938,8 +978,7 @@ def cast_overflow_tensors(tensors: torch.Tensor, offset: float = 1000) -> torch.
 
 
 def fast_topk(values: torch.Tensor, topk: int, dim: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Optimized topk implementation that uses torch.max for k=1 case.
+    """Optimized topk implementation that uses torch.max for k=1 case.
 
     This function provides better performance for the common case of k=1
     by using torch.max instead of the more general torch.topk.
@@ -952,6 +991,7 @@ def fast_topk(values: torch.Tensor, topk: int, dim: int) -> tuple[torch.Tensor, 
     Returns:
         Tuple of (values, indices) where values are the top-k values
         and indices are their corresponding indices in the input tensor
+
     """
     if topk == 1:
         # Use max along the specified dimension to get both value and index
@@ -1011,13 +1051,14 @@ def process_eagle_weight(
     model: nn.Module,
     name: str,
 ) -> None:
-    """
-    Update EAGLE model flags based on loaded weight name.
+    """Update EAGLE model flags based on loaded weight name.
     This should be called during weight loading to detect if a model
     has its own lm_head or embed_tokens weight.
+
     Args:
         model: The model instance (must support EAGLE)
         name: The name of the weight to process
+
     """
     if not supports_any_eagle(model):
         return
@@ -1036,6 +1077,7 @@ def get_layer_index(feature_layer_index: int, num_hidden_layers: int) -> int:
     Args:
         feature_layer_index: Index of a required layer in the visual encoder.
         num_hidden_layers: The total number of hidden layers in the visual encoder.
+
     """
     if feature_layer_index < 0:
         return num_hidden_layers + feature_layer_index + 1

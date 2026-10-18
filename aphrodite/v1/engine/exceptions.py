@@ -1,21 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from aphrodite.exceptions import APHRODITEServerError
+from aphrodite.exceptions import AphroditeServerError
 
 
-class EngineGenerateError(APHRODITEServerError):
+class EngineGenerateError(AphroditeServerError):
     """Raised when a AsyncLLM.generate() fails. Recoverable."""
 
     pass
 
 
-class EngineDeadError(APHRODITEServerError):
-    """Raised when the EngineCore dies. Unrecoverable."""
+class EngineDeadError(AphroditeServerError):
+    """Raised when the EngineCore dies. Unrecoverable.
+
+    `str(exc)` is the log-oriented message for server logs and offline
+    tracebacks; `CLIENT_MESSAGE` is what API clients receive.
+    """
+
+    ENGINE_DEAD_MESSAGE = "EngineCore encountered an issue. See stack trace (above) for the root cause."
+    CLIENT_MESSAGE = "The server had an error while processing your request."
 
     def __init__(self, *args, suppress_context: bool = False, **kwargs):
-        ENGINE_DEAD_MESSAGE = "EngineCore encountered an issue. See stack trace (above) for the root cause."  # noqa: E501
-
-        super().__init__(ENGINE_DEAD_MESSAGE, *args, **kwargs)
+        super().__init__(self.ENGINE_DEAD_MESSAGE, *args, **kwargs)
         # Make stack trace clearer when using with LLMEngine by
         # silencing irrelevant ZMQError.
         self.__suppress_context__ = suppress_context

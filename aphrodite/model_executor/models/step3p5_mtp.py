@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 
 from aphrodite.config import AphroditeConfig
 from aphrodite.logger import init_logger
@@ -22,7 +22,11 @@ from aphrodite.model_executor.model_loader.weight_utils import default_weight_lo
 from aphrodite.sequence import IntermediateTensors
 
 from .step3p5 import Step3p5DecoderLayer
-from .utils import get_spec_layer_idx_from_weight_name, maybe_prefix
+from .utils import (
+    get_draft_quant_config,
+    get_spec_layer_idx_from_weight_name,
+    maybe_prefix,
+)
 
 logger = init_logger(__name__)
 
@@ -30,7 +34,7 @@ logger = init_logger(__name__)
 class SharedHead(nn.Module):
     def __init__(
         self,
-        config: PretrainedConfig,
+        config: PreTrainedConfig,
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
     ) -> None:
@@ -146,8 +150,19 @@ class Step3p5AMultiTokenPredictor(nn.Module):
 
 
 class Step3p5MTP(nn.Module):
+    # Each MTP layer's shared_head carries its own LM head weights.
+    has_own_lm_head = True
+
     def __init__(self, *, aphrodite_config: AphroditeConfig, prefix: str = ""):
         super().__init__()
+        # The target config may be a multimodal wrapper (Step3.7); build the
+        # draft from its own text and quant configs.
+        assert aphrodite_config.speculative_config is not None
+        draft_quant_config = get_draft_quant_config(aphrodite_config)
+        aphrodite_config = aphrodite_config.with_hf_config(
+            aphrodite_config.speculative_config.draft_model_config.hf_config
+        )
+        aphrodite_config.quant_config = draft_quant_config
         self.config = aphrodite_config.model_config.hf_config
         self.aphrodite_config = aphrodite_config
         self.model = Step3p5AMultiTokenPredictor(
@@ -287,9 +302,8 @@ class Step3p5MTP(nn.Module):
             )
         return loaded_params
 
-    def _rewrite_spec_layer_name(self, spec_layer: int, name: str) -> str:
-        """
-        Rewrite the weight name to match the format of the original model.
+    def _rewrite_spec_layer_name(self, spec_layer: int | None, name: str) -> str:
+        """Rewrite the weight name to match the format of the original model.
         Add .mtp_block for modules in transformer layer block for spec layer
         """
         spec_layer_weight_names = [
@@ -306,5 +320,6 @@ class Step3p5MTP(nn.Module):
                 break
         if not spec_layer_weight:
             # treat rest weights as weights for transformer layer block
+            assert spec_layer is not None
             name = name.replace(f"model.layers.{spec_layer}.", f"model.layers.{spec_layer}.mtp_block.")
         return name

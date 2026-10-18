@@ -4,53 +4,68 @@ import asyncio
 import os
 import socket
 import time
-import warnings
 from collections.abc import AsyncGenerator, Iterable, Mapping
 from copy import copy
-from typing import Any, Optional
+from typing import Any
 
 import aphrodite.envs as envs
 from aphrodite import TokensPrompt
 from aphrodite.config import AphroditeConfig
+from aphrodite.config.kv_events import KVEventsConfig
+from aphrodite.config.profiler import (
+    validate_profile_iteration_bounds,
+    validate_profile_prefix,
+)
 from aphrodite.distributed.weight_transfer.base import (
     WeightTransferInitRequest,
     WeightTransferUpdateRequest,
 )
 from aphrodite.engine.arg_utils import AsyncEngineArgs
 from aphrodite.engine.protocol import EngineClient, StreamingInput
-from aphrodite.entrypoints.serve.elastic_ep.middleware import set_scaling_elastic_ep
+from aphrodite.entrypoints.serve.elastic_ep.middleware import (
+    get_elastic_ep_rank_retired,
+    set_elastic_ep_rank_retired,
+    set_scaling_elastic_ep,
+)
 from aphrodite.exceptions import (
-    APHRODITEClientError,
-    APHRODITEValidationError,
+    AphroditeClientError,
+    AphroditeValidationError,
     GracefulHTTPError,
     MaxQueuedTokensError,
+    ProfilerAlreadyActiveError,
     QueueOverflowError,
 )
 from aphrodite.inputs import EngineInput, PromptType
-from aphrodite.logger import init_logger
+from aphrodite.logger import configure_logging_if_needed, init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from aphrodite.outputs import STREAM_FINISHED, PoolingRequestOutput, RequestOutput
 from aphrodite.pooling_params import PoolingParams
-from aphrodite.profiler.wrapper import TorchProfilerWrapper
+from aphrodite.profiler.wrapper import TorchProfilerWrapper, create_frontend_profiler
 from aphrodite.renderers import renderer_from_config
 from aphrodite.renderers.inputs.preprocess import extract_prompt_components
 from aphrodite.sampling_params import RequestOutputKind, SamplingParams
 from aphrodite.tasks import SupportedTask
 from aphrodite.tokenizers import TokenizerLike
-from aphrodite.tracing import init_tracer
+from aphrodite.tracing import init_tracer, log_tracing_disabled_warning
 from aphrodite.transformers_utils.config import maybe_register_config_serialize_by_value
 from aphrodite.usage.usage_lib import UsageContext
 from aphrodite.utils.async_utils import cancel_task_threadsafe
 from aphrodite.utils.collection_utils import as_list
 from aphrodite.v1.engine import EngineCoreRequest, PauseMode
+from aphrodite.v1.engine.admission_control import SharedAdmissionStats
 from aphrodite.v1.engine.core_client import EngineCoreClient
 from aphrodite.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 from aphrodite.v1.engine.input_processor import InputProcessor
-from aphrodite.v1.engine.output_processor import OutputProcessor, RequestOutputCollector
+from aphrodite.v1.engine.output_processor import (
+    OutputProcessor,
+    RequestOutputCollector,
+    StreamingInputOutputCollector,
+)
 from aphrodite.v1.engine.parallel_sampling import ParentRequest
 from aphrodite.v1.executor import Executor
 from aphrodite.v1.fault_tolerance.utils import FaultToleranceRequest, FaultToleranceResult
+from aphrodite.v1.kv_hints import KvHintsEnvelope
 from aphrodite.v1.metrics.loggers import (
     StatLoggerFactory,
     StatLoggerManager,
@@ -91,10 +106,9 @@ class AsyncLLM(EngineClient):
         client_addresses: dict[str, Any] | None = None,
         client_count: int = 1,
         client_index: int = 0,
-        profiler: Optional[TorchProfilerWrapper] = None,  # type: ignore # noqa
+        profiler: TorchProfilerWrapper | None = None,
     ) -> None:
-        """
-        Create an AsyncLLM.
+        """Create an AsyncLLM.
 
         Args:
             aphrodite_config: global configuration.
@@ -104,14 +118,24 @@ class AsyncLLM(EngineClient):
             mm_registry: Multi-modal registry.
             log_requests: Whether to log requests.
             start_engine_loop: Whether to start the engine loop.
+            client_addresses: ZMQ addresses of an externally launched engine,
+                when not launching one in-process.
+            client_count: Number of API-server clients sharing the engine.
+            client_index: Index of this client within ``client_count``.
+            aggregate_engine_logging: Whether to aggregate per-engine logs
+                into a single stat logger.
             stat_loggers: customized stat loggers for the engine.
                 If not provided, default stat loggers will be used.
                 PLEASE BE AWARE THAT STAT LOGGER IS NOT STABLE
                 IN V1, AND ITS BASE CLASS INTERFACE MIGHT CHANGE.
+            profiler: Torch profiler wrapper used to trace the frontend.
 
         Returns:
             None
+
         """
+        configure_logging_if_needed(aphrodite_config.logging_config)
+
         # Ensure we can serialize custom transformer configs
         maybe_register_config_serialize_by_value()
 
@@ -144,12 +168,19 @@ class AsyncLLM(EngineClient):
         # Convert EngineInput --> EngineCoreRequest.
         self.input_processor = InputProcessor(self.aphrodite_config, renderer)
 
+        self.admission_stats = (
+            SharedAdmissionStats(client_addresses, client_count, client_index)
+            if client_addresses is not None and "mp_admission_counters" in client_addresses
+            else None
+        )
+
         # Converts EngineCoreOutputs --> RequestOutput.
         self.output_processor = OutputProcessor(
             renderer.tokenizer,
             log_stats=self.log_stats,
             stream_interval=self.aphrodite_config.scheduler_config.stream_interval,
             tracing_enabled=tracing_endpoint is not None,
+            admission_stats=self.admission_stats,
         )
 
         # EngineCore (starts the engine in background process).
@@ -190,22 +221,20 @@ class AsyncLLM(EngineClient):
         except RuntimeError:
             pass
 
-        if (
-            aphrodite_config.profiler_config.profiler == "torch"
-            and not aphrodite_config.profiler_config.ignore_frontend
-        ):
-            profiler_dir = aphrodite_config.profiler_config.torch_profiler_dir
-            logger.info(
-                "Torch profiler enabled. AsyncLLM CPU traces will be collected under %s",  # noqa: E501
-                profiler_dir,
-            )
-            worker_name = f"{socket.gethostname()}_{os.getpid()}.async_llm"
-            self.profiler = TorchProfilerWrapper(
-                aphrodite_config.profiler_config,
-                worker_name=worker_name,
-                local_rank=0,
-                activities=["CPU"],
-            )
+        self.profiler = profiler
+        self._frontend_profiler_injected = profiler is not None
+        self._profile_lock = asyncio.Lock()
+        self._profile_session_guard_enabled = client_count == 1
+        self._profile_session_active = False
+        if not self._frontend_profiler_injected and aphrodite_config.profiler_config.should_profile_frontend:
+            if self._profile_session_guard_enabled:
+                self._frontend_profiler_worker_name = f"{socket.gethostname()}_{os.getpid()}.async_llm"
+                self.profiler = create_frontend_profiler(
+                    aphrodite_config.profiler_config,
+                    worker_name=self._frontend_profiler_worker_name,
+                )
+            else:
+                logger.warning("Frontend CPU profiling is disabled when multiple API server processes share an engine.")
 
     @classmethod
     def from_aphrodite_config(
@@ -245,7 +274,6 @@ class AsyncLLM(EngineClient):
         stat_loggers: list[StatLoggerFactory] | None = None,
     ) -> "AsyncLLM":
         """Create an AsyncLLM from the EngineArgs."""
-
         # Create the engine configs.
         aphrodite_config = engine_args.create_engine_config(usage_context)
         executor_class = Executor.get_class(aphrodite_config)
@@ -290,8 +318,9 @@ class AsyncLLM(EngineClient):
         Both limits return HTTP 503 (Service Unavailable) so that load
         balancers and client SDKs retry on a different instance.
 
-        - ``max_num_queued_reqs``: hard cap on the number of unfinished requests
-          (waiting + running).  A request with ``n > 1`` counts as ``n`` slots.
+        - ``max_num_queued_reqs``: approximate global cap on the number of
+          unfinished requests (waiting + running). A request with ``n > 1``
+          counts as ``n`` slots.
         - ``max_num_queued_tokens``: TTFT QoS — cap on the total prompt
           tokens of requests still in prefill.
 
@@ -308,31 +337,43 @@ class AsyncLLM(EngineClient):
         Raises:
             QueueOverflowError: If ``max_num_queued_reqs`` would be exceeded.
             MaxQueuedTokensError: If ``max_num_queued_tokens`` would be exceeded.
+
         """
         max_num_reqs = self.scheduler_config.max_num_queued_reqs
         if max_num_reqs is not None:
-            current = self.get_num_unfinished_requests()
-            if current + n > max_num_reqs:
-                logger.info(
+            current_requests = (
+                self.admission_stats.get_num_requests()
+                if self.admission_stats is not None
+                else self.get_num_unfinished_requests()
+            )
+            if current_requests + n > max_num_reqs:
+                logger.debug(
                     "Request queue full - rejecting request %s (current=%d, n=%d, max=%d).",
                     request_id,
-                    current,
+                    current_requests,
                     n,
                     max_num_reqs,
                 )
+                self._record_admission_rejection("max_num_queued_reqs")
                 raise QueueOverflowError()
 
         max_queued_tokens = self.scheduler_config.max_num_queued_tokens
         if max_queued_tokens is not None:
             current_tokens = self.get_num_queued_tokens()
             if current_tokens >= max_queued_tokens:
-                logger.info(
+                logger.debug(
                     "Max queued tokens reached - rejecting request %s (current_tokens=%d, max=%d).",
                     request_id,
                     current_tokens,
                     max_queued_tokens,
                 )
+                self._record_admission_rejection("max_num_queued_tokens")
                 raise MaxQueuedTokensError()
+
+    def _record_admission_rejection(self, reason: str) -> None:
+        """Increment the frontend admission rejection counter if logging is on."""
+        if self.logger_manager is not None:
+            self.logger_manager.record_admission_rejection(reason)
 
     async def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         if not hasattr(self, "_supported_tasks"):
@@ -356,24 +397,26 @@ class AsyncLLM(EngineClient):
         prompt_text: str | None = None,
         reasoning_ended: bool | None = None,
         reasoning_parser_kwargs: dict[str, Any] | None = None,
+        kv_hints: KvHintsEnvelope | None = None,
     ) -> RequestOutputCollector:
         """Add new request to the AsyncLLM."""
-
         if self.errored:
             raise EngineDeadError()
 
-        is_pooling = isinstance(params, PoolingParams)
+        if trace_headers and self.observability_config.otlp_traces_endpoint is None:
+            log_tracing_disabled_warning()
+            trace_headers = None
 
-        if self.aphrodite_config.cache_config.kv_sharing_fast_prefill and not is_pooling and params.prompt_logprobs:
-            raise APHRODITEValidationError(
+        if (
+            self.aphrodite_config.cache_config.kv_sharing_fast_prefill
+            and isinstance(params, SamplingParams)
+            and params.prompt_logprobs
+        ):
+            raise AphroditeValidationError(
                 "--kv-sharing-fast-prefill produces incorrect logprobs for "
                 "prompt tokens, please disable it when the requests need "
                 "prompt logprobs"
             )
-
-        if isinstance(params, SamplingParams) and params.n > 1:
-            # TODO (NickLucche) Batch check admission check for all n requests
-            self.check_admission(params.n, request_id)
 
         if isinstance(prompt, AsyncGenerator):
             if reasoning_ended is not None or reasoning_parser_kwargs is not None:
@@ -391,6 +434,7 @@ class AsyncLLM(EngineClient):
                 priority,
                 data_parallel_rank,
                 session_id,
+                kv_hints,
             )
 
         # Convert Input --> Request.
@@ -409,6 +453,13 @@ class AsyncLLM(EngineClient):
                     "does not match the EngineCoreRequest.request_id attribute. The "
                     "latter will be used, and the former will be ignored."
                 )
+            request_params = request.params
+            if isinstance(request_params, SamplingParams):
+                # This request object is owned by the engine from here on.
+                self.input_processor.apply_watermarking(
+                    request_params,
+                    self.input_processor.resolve_watermarking(request_params),
+                )
         else:
             if isinstance(prompt, dict) and "type" in prompt:
                 # Rendered EngineInput; no blocking preprocessing needed.
@@ -424,6 +475,7 @@ class AsyncLLM(EngineClient):
                     priority=priority,
                     data_parallel_rank=data_parallel_rank,
                     session_id=session_id,
+                    kv_hints=kv_hints,
                 )
             else:
                 # Raw prompts require tokenization and possibly multimodal
@@ -440,6 +492,7 @@ class AsyncLLM(EngineClient):
                     priority=priority,
                     data_parallel_rank=data_parallel_rank,
                     session_id=session_id,
+                    kv_hints=kv_hints,
                 )
             prompt_text, _, _ = extract_prompt_components(self.model_config, prompt)
 
@@ -461,21 +514,34 @@ class AsyncLLM(EngineClient):
         # Use cloned params that may have been updated in process_inputs()
         params = request.params
 
-        if is_pooling or params.n == 1:
+        if isinstance(params, PoolingParams) or params.n == 1:
             await self._add_request(request, prompt_text, None, 0, queue)
             return queue
 
         parent_params = params
-        assert isinstance(parent_params, SamplingParams)
 
         # Fan out child requests (for n>1).
         parent_request = ParentRequest(request)
+        child_requests: list[EngineCoreRequest] = []
         for idx in range(parent_params.n):
             request_id, child_params = parent_request.get_child_info(idx)
             child_request = request if idx == parent_params.n - 1 else copy(request)
             child_request.request_id = request_id
             child_request.sampling_params = child_params
-            await self._add_request(child_request, prompt_text, parent_request, idx, queue)
+            child_requests.append(child_request)
+
+        self.check_admission(parent_params.n, parent_request.request_id)
+        try:
+            for idx, child_request in enumerate(child_requests):
+                self.output_processor.add_request(child_request, prompt_text, parent_request, idx, queue)
+
+            for child_request in child_requests:
+                await self.engine_core.add_request_async(child_request)
+                if self.log_requests:
+                    logger.info("Added request %s.", child_request.request_id)
+        except BaseException:
+            await self.abort(parent_request.request_id, internal=True)
+            raise
         return queue
 
     async def _add_request(
@@ -510,8 +576,12 @@ class AsyncLLM(EngineClient):
         priority: int = 0,
         data_parallel_rank: int | None = None,
         session_id: str | None = None,
+        kv_hints: KvHintsEnvelope | None = None,
     ) -> RequestOutputCollector:
+        self._validate_resumable_request()
         self._validate_streaming_input_sampling_params(sampling_params)
+        # Validation rejects pooling parameters before accessing sampling-only fields.
+        assert isinstance(sampling_params, SamplingParams)
 
         inputs = dict(
             supported_tasks=await self.get_supported_tasks(),
@@ -522,6 +592,7 @@ class AsyncLLM(EngineClient):
             priority=priority,
             data_parallel_rank=data_parallel_rank,
             session_id=session_id,
+            kv_hints=kv_hints,
         )
 
         if not sampling_params.skip_clone:
@@ -539,12 +610,19 @@ class AsyncLLM(EngineClient):
         self.input_processor.assign_request_id(final_req)
         internal_req_id = final_req.request_id
 
-        queue = RequestOutputCollector(sampling_params.output_kind, internal_req_id)
+        queue = StreamingInputOutputCollector(sampling_params.output_kind, internal_req_id)
 
         async def handle_inputs():
             cancelled = False
+            errored = False
+            any_added = False
             try:
                 async for input_chunk in input_stream:
+                    # Stop once the session has finished (aborted or errored).
+                    # There is no await between this check and the ADD send,
+                    # so any chunk already sent precedes the engine abort.
+                    if any_added and not self.output_processor.has_request(internal_req_id):
+                        break
                     sp = input_chunk.sampling_params
                     if sp:
                         self._validate_streaming_input_sampling_params(sp)
@@ -560,21 +638,28 @@ class AsyncLLM(EngineClient):
                     )
                     req.external_req_id = request_id
                     if req.prompt_embeds is not None:
-                        raise APHRODITEValidationError("prompt_embeds not supported for streaming inputs")
+                        raise AphroditeValidationError("prompt_embeds not supported for streaming inputs")
                     prompt_text, _, _ = extract_prompt_components(self.model_config, input_chunk.prompt)
                     await self._add_request(req, prompt_text, None, 0, queue)
+                    any_added = True
             except (asyncio.CancelledError, GeneratorExit):
                 cancelled = True
             except Exception as error:
                 # Wrap in InputStreamError so generate() can propagate it
                 # without wrapping in EngineGenerateError.
                 queue.put(InputStreamError(error))
+                errored = True
             finally:
                 queue._input_stream_task = None
                 if not cancelled:
-                    # Send empty final request to indicate that inputs have
-                    # finished. Don't send if cancelled (session was aborted).
-                    await self._add_request(final_req, None, None, 0, queue)
+                    if any_added:
+                        # Send empty final request to indicate that inputs have
+                        # finished. Don't send if cancelled or if the session
+                        # already finished (aborted or errored).
+                        if self.output_processor.has_request(internal_req_id):
+                            await self._add_request(final_req, None, None, 0, queue)
+                    elif not errored:
+                        queue.put(STREAM_FINISHED)
 
         # Ensure output handler is running.
         self._run_output_handler()
@@ -582,17 +667,21 @@ class AsyncLLM(EngineClient):
         queue._input_stream_task = asyncio.create_task(handle_inputs())
         return queue
 
+    def _validate_resumable_request(self) -> None:
+        if self.aphrodite_config.is_mm_encoder_only or self.model_config.is_diffusion:
+            raise AphroditeValidationError("Resumable requests are not supported for encoder-only or diffusion models.")
+
     @staticmethod
     def _validate_streaming_input_sampling_params(
         params: SamplingParams | PoolingParams,
-    ):
+    ) -> None:
         if (
             not isinstance(params, SamplingParams)
             or params.n > 1
             or params.output_kind == RequestOutputKind.FINAL_ONLY
             or params.stop
         ):
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "Input streaming not currently supported "
                 "for pooling models, n > 1, request_kind = FINAL_ONLY "
                 "or with stop strings."
@@ -616,11 +705,11 @@ class AsyncLLM(EngineClient):
         priority: int = 0,
         data_parallel_rank: int | None = None,
         session_id: str | None = None,
+        kv_hints: KvHintsEnvelope | None = None,
         reasoning_ended: bool | None = None,
         reasoning_parser_kwargs: dict[str, Any] | None = None,
     ) -> AsyncGenerator[RequestOutput, None]:
-        """
-        Main function called by the API server to kick off a request
+        """Main function called by the API server to kick off a request
             * 1) Making an AsyncStream corresponding to the Request.
             * 2) Processing the Input.
             * 3) Adding the Request to the Detokenizer.
@@ -643,8 +732,8 @@ class AsyncLLM(EngineClient):
             >>> params = self.renderer.default_cmpl_tok_params
             >>> (engine_input,) = self.renderer.render_cmpl([parsed], params)
             >>> gen = self.generate(engine_input, sampling_params, request_id)
-        """
 
+        """
         q: RequestOutputCollector | None = None
         try:
             q = await self.add_request(
@@ -657,6 +746,7 @@ class AsyncLLM(EngineClient):
                 priority=priority,
                 data_parallel_rank=data_parallel_rank,
                 session_id=session_id,
+                kv_hints=kv_hints,
                 prompt_text=prompt_text,
                 reasoning_ended=reasoning_ended,
                 reasoning_parser_kwargs=reasoning_parser_kwargs,
@@ -694,7 +784,7 @@ class AsyncLLM(EngineClient):
             raise
 
         # Request validation error or admission control rejection.
-        except (APHRODITEClientError, GracefulHTTPError) as e:
+        except (AphroditeClientError, GracefulHTTPError) as e:
             if self.log_requests:
                 logger.info("Request %s failed (bad request): %s.", request_id, e)
             raise
@@ -724,7 +814,6 @@ class AsyncLLM(EngineClient):
 
     def _run_output_handler(self):
         """Background loop: pulls from EngineCore and pushes to AsyncStreams."""
-
         if self.output_handler is not None:
             return
 
@@ -761,7 +850,10 @@ class AsyncLLM(EngineClient):
                         outputs_slice = engine_core_outputs[start:end]
                         # 2) Process EngineCoreOutputs.
                         processed_outputs = output_processor.process_outputs(
-                            outputs_slice, outputs.timestamp, iteration_stats
+                            outputs_slice,
+                            outputs.timestamp,
+                            iteration_stats,
+                            weight_version=outputs.weight_version,
                         )
                         # NOTE: RequestOutputs are pushed to their queues.
                         assert not processed_outputs.request_outputs
@@ -797,6 +889,10 @@ class AsyncLLM(EngineClient):
                             mm_cache_stats=renderer.stat_mm_cache(),
                         )
             except Exception as e:
+                if get_elastic_ep_rank_retired() and isinstance(e, EngineDeadError):
+                    logger.info("[Elastic EP] Retired rank stopped receiving EngineCore outputs")
+                    output_processor.propagate_error(e)
+                    return
                 logger.exception("AsyncLLM output_handler failed.")
                 output_processor.propagate_error(e)
 
@@ -804,7 +900,6 @@ class AsyncLLM(EngineClient):
 
     async def abort(self, request_id: str | Iterable[str], internal: bool = False) -> None:
         """Abort RequestId in OutputProcessor and EngineCore."""
-
         request_ids = (request_id,) if isinstance(request_id, str) else as_list(request_id)
         all_request_ids = self.output_processor.abort_requests(request_ids, internal)
         await self.engine_core.abort_requests_async(all_request_ids)
@@ -829,6 +924,7 @@ class AsyncLLM(EngineClient):
             sampling_params=SamplingParams(
                 max_tokens=1,
                 extra_args={"kv_transfer_params": dict(kv_transfer_params)},
+                watermarking=False,
             ),
             pooling_params=None,
             arrival_time=time.time(),
@@ -843,11 +939,9 @@ class AsyncLLM(EngineClient):
         self,
         *,
         mode: PauseMode = "abort",
-        wait_for_inflight_requests: bool | None = None,
         clear_cache: bool = True,
     ) -> None:
-        """
-        Pause generation to allow model weight updates.
+        """Pause generation to allow model weight updates.
 
         All mode handling (abort / wait / keep) and cache clearing is done
         in the engine. New generation/encoding requests will not be scheduled
@@ -860,19 +954,10 @@ class AsyncLLM(EngineClient):
                 - ``"wait"``: Wait for in-flight requests to complete.
                 - ``"keep"``: Freeze requests in queue; they resume on
                   :meth:`resume_generation`.
-            wait_for_inflight_requests: DEPRECATED: use mode argument.
             clear_cache: Whether to clear KV cache and prefix cache after
                 draining. Set to ``False`` to preserve cache for faster resume.
+
         """
-        if wait_for_inflight_requests:
-            warnings.warn(
-                "The `wait_for_inflight_requests` parameter in "
-                "`AsyncLLM.pause_generation()` is deprecated. "
-                "Please use `mode` argument instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            mode = "wait"
         if clear_cache:
             await self.renderer.clear_mm_cache_async()
         await self.engine_core.pause_scheduler_async(mode=mode, clear_cache=clear_cache)
@@ -903,8 +988,7 @@ class AsyncLLM(EngineClient):
         tokenization_kwargs: dict[str, Any] | None = None,
         reasoning_ended: bool | None = None,
     ) -> AsyncGenerator[PoolingRequestOutput, None]:
-        """
-        Main function called by the API server to kick off a request
+        """Main function called by the API server to kick off a request
             * 1) Making an AsyncStream corresponding to the Request.
             * 2) Processing the Input.
             * 3) Adding the Request to the EngineCore (separate process).
@@ -916,7 +1000,6 @@ class AsyncLLM(EngineClient):
         The caller of generate() iterates the returned AsyncGenerator,
         returning the RequestOutput back to the caller.
         """
-
         q: RequestOutputCollector | None = None
         try:
             q = await self.add_request(
@@ -959,7 +1042,7 @@ class AsyncLLM(EngineClient):
             raise
 
         # Request validation error or admission control rejection.
-        except (APHRODITEClientError, GracefulHTTPError):
+        except (AphroditeClientError, GracefulHTTPError):
             if self.log_requests:
                 logger.info("Request %s failed (bad request).", request_id)
             raise
@@ -991,20 +1074,53 @@ class AsyncLLM(EngineClient):
 
     async def check_health(self) -> None:
         logger.debug("Called check_health.")
+        if get_elastic_ep_rank_retired():
+            return
         if self.errored:
             raise self.dead_error
 
-    async def start_profile(self, profile_prefix: str | None = None) -> None:
-        coros = [self.engine_core.profile_async(True, profile_prefix)]
-        if self.profiler is not None:
-            coros.append(asyncio.to_thread(self.profiler.start))
-        await asyncio.gather(*coros)
+    async def start_profile(
+        self,
+        profile_prefix: str | None = None,
+        *,
+        delay_iterations: int | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
+        async with self._profile_lock:
+            if self._profile_session_guard_enabled and self._profile_session_active:
+                raise ProfilerAlreadyActiveError()
+            validate_profile_prefix(profile_prefix)
+            validate_profile_iteration_bounds(delay_iterations, max_iterations)
+
+            if self._profile_session_guard_enabled:
+                self._profile_session_active = True
+            # A cancelled start may still take effect, so only a reported
+            # engine failure clears the session; otherwise /stop_profile is needed.
+            try:
+                await self.engine_core.profile_async(
+                    True,
+                    profile_prefix,
+                    delay_iterations,
+                    max_iterations,
+                )
+            except Exception:
+                self._profile_session_active = False
+                raise
+            if self.profiler is not None:
+                if not self._frontend_profiler_injected:
+                    worker_name = self._frontend_profiler_worker_name
+                    if profile_prefix is not None:
+                        worker_name = f"{profile_prefix}_{worker_name}"
+                    self.profiler.set_output_name(worker_name)
+                await asyncio.to_thread(self.profiler.start)
 
     async def stop_profile(self) -> None:
-        coros = [self.engine_core.profile_async(False)]
-        if self.profiler is not None:
-            coros.append(asyncio.to_thread(self.profiler.stop))
-        await asyncio.gather(*coros)
+        async with self._profile_lock:
+            coros = [self.engine_core.profile_async(False)]
+            if self.profiler is not None:
+                coros.append(asyncio.to_thread(self.profiler.stop))
+            await asyncio.gather(*coros)
+            self._profile_session_active = False
 
     async def reset_mm_cache(self) -> None:
         # Join the background MM warmup first: the mm_processor_cache is not
@@ -1027,11 +1143,20 @@ class AsyncLLM(EngineClient):
         if self.logger_manager is not None:
             self.logger_manager.record_sleep_state(1, level)
 
-    async def wake_up(self, tags: list[str] | None = None) -> None:
-        await self.engine_core.wake_up_async(tags)
+    async def release_kv_cache_memory(self) -> None:
+        await self.renderer.clear_mm_cache_async()
+        await self.engine_core.release_kv_cache_memory_async()
 
         if self.logger_manager is not None:
+            self.logger_manager.record_sleep_state(1, 0)
+
+    async def wake_up(self, tags: list[str] | None = None) -> bool:
+        fully_awake = await self.engine_core.wake_up_async(tags)
+
+        if self.logger_manager is not None and fully_awake:
             self.logger_manager.record_sleep_state(0, 0)
+
+        return fully_awake
 
     async def checkpoint_prepare(self) -> None:
         await self.collective_rpc("checkpoint_prepare")
@@ -1041,6 +1166,9 @@ class AsyncLLM(EngineClient):
 
     async def is_sleeping(self) -> bool:
         return await self.engine_core.is_sleeping_async()
+
+    async def compute_weight_checksums(self) -> list[dict[str, str]]:
+        return await self.engine_core.compute_weight_checksums_async()
 
     async def add_lora(self, lora_request: LoRARequest) -> bool:
         """Load a new LoRA adapter into the engine for future requests."""
@@ -1065,9 +1193,7 @@ class AsyncLLM(EngineClient):
         args: tuple = (),
         kwargs: dict | None = None,
     ):
-        """
-        Perform a collective RPC call to the given path.
-        """
+        """Perform a collective RPC call to the given path."""
         return await self.engine_core.collective_rpc_async(method, timeout, args, kwargs)
 
     async def wait_for_requests_to_drain(self, drain_timeout: int = 300):
@@ -1087,8 +1213,11 @@ class AsyncLLM(EngineClient):
         try:
             logger.info("APHRODITE_ELASTIC_EP_DRAIN_REQUESTS is set, waiting for requests to drain before scaling")
             await self.wait_for_requests_to_drain(drain_timeout)
-        except BaseException:
-            set_scaling_elastic_ep(False)
+        except BaseException as e:
+            if self.aphrodite_config.parallel_config.data_parallel_external_lb:
+                await self.engine_core.abort_external_elastic_ep(str(e) or type(e).__name__)
+            else:
+                set_scaling_elastic_ep(False)
             raise
 
     async def scale_elastic_ep(self, new_data_parallel_size: int, drain_timeout: int = 300):
@@ -1097,7 +1226,8 @@ class AsyncLLM(EngineClient):
             await self._scale_elastic_ep(new_data_parallel_size, drain_timeout)
 
     async def _scale_elastic_ep(self, new_data_parallel_size: int, drain_timeout: int) -> None:
-        old_data_parallel_size = self.aphrodite_config.parallel_config.data_parallel_size
+        parallel_config = self.aphrodite_config.parallel_config
+        old_data_parallel_size = parallel_config.data_parallel_size
         if old_data_parallel_size == new_data_parallel_size:
             logger.info(
                 "Data parallel size is already %s, skipping scale",
@@ -1125,17 +1255,41 @@ class AsyncLLM(EngineClient):
             self.logger_manager.log_engine_initialized()
 
         set_scaling_elastic_ep(True)
-        try:
-            if envs.APHRODITE_ELASTIC_EP_DRAIN_REQUESTS:
-                await self._drain_requests_for_elastic_ep(drain_timeout)
+        if envs.APHRODITE_ELASTIC_EP_DRAIN_REQUESTS:
+            await self._drain_requests_for_elastic_ep(drain_timeout)
 
+        rank_will_retire = (
+            parallel_config.data_parallel_external_lb
+            and new_data_parallel_size < old_data_parallel_size
+            and parallel_config.data_parallel_rank >= new_data_parallel_size
+        )
+        if rank_will_retire:
+            set_elastic_ep_rank_retired(True)
+
+        commit_succeeded = False
+        try:
             await self.engine_core.commit_elastic_ep()
-            self.aphrodite_config.parallel_config.data_parallel_size = new_data_parallel_size
+            parallel_config.data_parallel_size = new_data_parallel_size
+            commit_succeeded = True
+            if rank_will_retire:
+                logger.info(
+                    "[Elastic EP] Data-parallel rank %s is retired and awaiting external process shutdown",
+                    parallel_config.data_parallel_rank,
+                )
         finally:
-            set_scaling_elastic_ep(False)
+            if rank_will_retire and not commit_succeeded:
+                set_elastic_ep_rank_retired(False)
+            # A failed commit may leave engines partially reconfigured or paused.
+            if commit_succeeded:
+                set_scaling_elastic_ep(False)
+
+    async def get_external_elastic_ep_status(
+        self,
+    ) -> dict[str, str | int | None] | None:
+        return await self.engine_core.get_external_elastic_ep_status()
 
     async def handle_fault(self, fault_tolerance_request: FaultToleranceRequest) -> FaultToleranceResult:
-        """send fault tolerance instruction to the engine"""
+        """Send fault tolerance instruction to the engine."""
         return await self.engine_core.handle_fault(fault_tolerance_request)
 
     async def get_status(self):
@@ -1155,17 +1309,25 @@ class AsyncLLM(EngineClient):
         return self.engine_core.resources.engine_dead or not self.is_running
 
     @property
+    def should_keep_api_server_alive(self) -> bool:
+        return get_elastic_ep_rank_retired()
+
+    @property
     def dead_error(self) -> BaseException:
         return EngineDeadError()
 
     async def init_weight_transfer_engine(self, request: WeightTransferInitRequest) -> None:
-        """
-        Initialize weight transfer for RL training.
+        """Initialize weight transfer for RL training.
 
         Args:
             request: Weight transfer initialization request with backend-specific info
+
         """
         await self.collective_rpc("init_weight_transfer_engine", kwargs={"init_info": request.init_info})
+
+    async def shutdown_weight_transfer_engine(self) -> None:
+        """Release the trainer connection without shutting down inference."""
+        await self.collective_rpc("shutdown_weight_transfer_engine")
 
     async def start_weight_update(self) -> None:
         """Start a new weight update."""
@@ -1176,11 +1338,11 @@ class AsyncLLM(EngineClient):
         await self.collective_rpc("start_draft_weight_update")
 
     async def update_weights(self, request: WeightTransferUpdateRequest) -> None:
-        """
-        Batched weight update for RL training.
+        """Batched weight update for RL training.
 
         Args:
             request: Weight update request with backend-specific update info
+
         """
         await self.collective_rpc("update_weights", kwargs={"update_info": request.update_info})
 
@@ -1197,3 +1359,6 @@ class AsyncLLM(EngineClient):
     async def get_weight_version(self) -> str:
         """Return the latest committed weight version."""
         return await self.engine_core.get_weight_version_async()
+
+    def get_kv_event_sources(self) -> dict[int, KVEventsConfig]:
+        return self.engine_core.get_kv_event_sources()

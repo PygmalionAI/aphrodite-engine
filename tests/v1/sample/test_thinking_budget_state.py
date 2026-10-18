@@ -10,16 +10,12 @@ from aphrodite.v1.sample.logits_processor.interface import (
     MoveDirectionality,
 )
 from aphrodite.v1.sample.thinking_budget_state import ThinkingBudgetStateHolder
-
-
-class _MockReasoningConfig:
-    reasoning_start_token_ids = [151667]
-    reasoning_end_token_ids = [151668]
+from tests.v1.sample.utils import create_mock_reasoning_config
 
 
 def _make_holder() -> ThinkingBudgetStateHolder:
     return ThinkingBudgetStateHolder(
-        _MockReasoningConfig(),
+        create_mock_reasoning_config([151667], [151668]),
         8,
         0,
         torch.device("cpu"),

@@ -10,27 +10,35 @@ import numpy as np
 import torch
 
 import aphrodite.envs as envs
+from aphrodite.config.compilation import CUDAGraphMode
 from aphrodite.distributed.parallel_state import get_tp_group
 from aphrodite.logger import init_logger
 from aphrodite.utils.gpu_sync_debug import gpu_sync_allowed
+from aphrodite.utils.torch_utils import async_tensor_h2d
 from aphrodite.v1.attention.backend import AttentionCGSupport
 from aphrodite.v1.utils import CpuGpuBuffer
 from aphrodite.v1.worker.gpu.async_utils import StepTimingSample, stream
 from aphrodite.v1.worker.gpu.attn_utils import (
-    get_attn_cg_support,
     get_query_lens_mismatch_unsupported_backend,
+    get_varlen_cudagraph_unsupported_backend,
 )
-from aphrodite.v1.worker.gpu.buffer_utils import async_copy_to_gpu
 
 logger = init_logger(__name__)
 _PROFILE_REPLAYS = 5
 
 if TYPE_CHECKING:
     from aphrodite.config import AphroditeConfig
-    from aphrodite.v1.worker.gpu.attn_utils import AttentionCGSupportInfo
     from aphrodite.v1.worker.gpu.input_batch import InputBatch
     from aphrodite.v1.worker.gpu.states import RequestState
     from aphrodite.v1.worker.utils import AttentionGroup
+
+
+def resolve_adaptive_cudagraph_mode(mode: CUDAGraphMode, *, piecewise_capture_available: bool) -> CUDAGraphMode:
+    """Select a separate decode route for variable-length verification."""
+    assert mode.has_full_cudagraphs()
+    if mode == CUDAGraphMode.FULL_DECODE_ONLY or not piecewise_capture_available:
+        return CUDAGraphMode.FULL_DECODE_ONLY
+    return CUDAGraphMode.FULL_AND_PIECEWISE
 
 
 def _assign_draft_token_budget(
@@ -75,9 +83,14 @@ def build_cost_tables_from_curves(
     """Build cost tables: graph-padded below the capture limit, smooth above.
 
     Args:
+        draft_curve: (size, cost) samples for the draft model.
+        verify_curve: (size, cost) samples for the verify model.
+        max_num_reqs: Largest request count to build a table for.
+        max_batch_tokens: Largest token count to build a table for.
         cudagraph_limit: Largest cudagraph-captured size. At or below it,
             execution pads up to the next captured size, so cost is a step
             function. Above it there is no padding, so cost is continuous.
+
     """
 
     def build_table(limit: int, curve: list[tuple[int, float]]) -> np.ndarray:
@@ -228,11 +241,7 @@ class AdaptiveVerificationManager:
         )
         logger.debug("DSpark cost tables: %s", self.cost_tables)
 
-    def record_confidences(
-        self,
-        confidence_probs: torch.Tensor,
-        input_batch: "InputBatch",
-    ) -> None:
+    def record_confidences(self, confidence_probs: torch.Tensor, input_batch: "InputBatch") -> None:
         """Publish this step's raw confidences for the ranking kernel and start
         copying them to the CPU, where a later step's budget reads them."""
         num_reqs = input_batch.num_reqs
@@ -277,9 +286,9 @@ class AdaptiveVerificationManager:
         )
         num_non_draft_tokens = scheduled_tokens - scheduled_drafts
         slots = np.fromiter(
-            (self.req_states.req_id_to_index[req_id] for req_id in req_ids),
+            map(self.req_states.req_id_to_index.__getitem__, req_ids),
             dtype=np.int32,
-            count=len(req_ids),
+            count=num_reqs,
         )
         stale_confidences = self._stale_confidences[self._stale_idx].np[slots]
         survival_probability = np.cumprod(stale_confidences.astype(np.float64), axis=1)
@@ -381,7 +390,7 @@ class AdaptiveVerificationManager:
         if draft_budget == 0:
             capacities.zero_()
         else:
-            async_copy_to_gpu(scheduled_drafts, out=capacities)
+            async_tensor_h2d(scheduled_drafts, out=capacities)
             if draft_budget < int(scheduled_drafts.sum()):
                 _assign_draft_token_budget_compiled(
                     self._confidence_probs,
@@ -392,10 +401,7 @@ class AdaptiveVerificationManager:
                 )
 
         num_non_draft_tokens_gpu = self._num_non_draft_tokens[:num_reqs]
-        async_copy_to_gpu(
-            num_non_draft_tokens,
-            out=num_non_draft_tokens_gpu,
-        )
+        async_tensor_h2d(num_non_draft_tokens, out=num_non_draft_tokens_gpu)
         self._cu_num_logits[:1].zero_()
         torch.cumsum(
             capacities + self.num_bonus_tokens,
@@ -420,7 +426,6 @@ def maybe_create_adaptive_verification_manager(
     *,
     enable_adaptive_verification: bool,
     attn_groups: list[list["AttentionGroup"]],
-    attn_cg_support: "AttentionCGSupportInfo",
     req_states: "RequestState",
     query_start_loc: torch.Tensor,
     num_bonus_tokens: int,
@@ -434,10 +439,7 @@ def maybe_create_adaptive_verification_manager(
 
     # The selector rejects unsupported backends, but models that
     # hard-wire theirs (e.g. DeepSeek-V4) never go through it.
-    backend = get_query_lens_mismatch_unsupported_backend(
-        attn_groups,
-        checked_layer_names=target_layer_names,
-    )
+    backend = get_query_lens_mismatch_unsupported_backend(attn_groups, checked_layer_names=target_layer_names)
     if backend is not None:
         raise ValueError(
             "Adaptive verification trims verification requests on device, which"
@@ -446,23 +448,28 @@ def maybe_create_adaptive_verification_manager(
             "use a backend that does."
         )
 
-    target_attn_cg_support = attn_cg_support
-    if target_layer_names is not None:
-        target_attn_cg_support = get_attn_cg_support(
-            attn_groups,
-            aphrodite_config,
-            checked_layer_names=target_layer_names,
-        )
-        if additional_attn_cg_support is not None:
-            target_attn_cg_support = target_attn_cg_support.narrow(*additional_attn_cg_support)
-    if target_attn_cg_support.min_cg_support != AttentionCGSupport.ALWAYS:
+    # The runner's decode_query_len, the width varlen decode graphs capture.
+    max_query_len = req_states.num_speculative_steps + num_bonus_tokens
+    unsupported: tuple[str | None, int | None] | None = get_varlen_cudagraph_unsupported_backend(
+        attn_groups,
+        aphrodite_config,
+        max_query_len,
+        checked_layer_names=target_layer_names,
+    )
+    if unsupported is None and additional_attn_cg_support is not None:
+        # Groups built outside init_attn_backend report only their support
+        # level, and without a bound only ALWAYS replays varlen batches.
+        additional_support, additional_backend = additional_attn_cg_support
+        if additional_support != AttentionCGSupport.ALWAYS:
+            unsupported = additional_backend, None
+    if unsupported is not None:
+        backend, bound = unsupported
+        allowed = "none" if bound is None else f"at most {bound}"
         raise ValueError(
-            "Adaptive verification captures varlen decode cudagraphs, so every"
-            " target attention builder must report AttentionCGSupport.ALWAYS, but "
-            f"{target_attn_cg_support.min_cg_attn_backend} reports "
-            f"{target_attn_cg_support.min_cg_support}. Pass "
-            "enable_adaptive_verification=false in the speculative config, or "
-            "use a backend that does."
+            "Adaptive verification replays decode cudagraphs whose per-request "
+            f"query lengths vary up to {max_query_len}, but {backend} allows "
+            f"{allowed}. Pass enable_adaptive_verification=false in the "
+            "speculative config, or use a backend that does."
         )
 
     return AdaptiveVerificationManager(

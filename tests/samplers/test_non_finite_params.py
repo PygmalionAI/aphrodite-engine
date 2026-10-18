@@ -11,7 +11,7 @@ import math
 import pytest
 
 from aphrodite import SamplingParams
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 
 
 class TestNonFiniteTemperature:
@@ -23,7 +23,7 @@ class TestNonFiniteTemperature:
         ids=["nan", "inf", "-inf", "math.nan", "math.inf"],
     )
     def test_non_finite_temperature_rejected(self, value: float):
-        with pytest.raises(APHRODITEValidationError, match="temperature"):
+        with pytest.raises(AphroditeValidationError, match="temperature"):
             SamplingParams(temperature=value)
 
     def test_finite_temperature_accepted(self):

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -10,6 +11,11 @@ from aphrodite.model_executor.layers.attention import MLAAttention
 from aphrodite.model_executor.layers.quantization import QuantizationConfig
 from aphrodite.models.common.ops import fused_q_kv_rmsnorm
 from aphrodite.platforms import current_platform
+
+if TYPE_CHECKING:
+    from aphrodite.v1.attention.backends.mla.index_group import (
+        SparseMLAIndexGroupBuilder,
+    )
 
 
 @dataclass
@@ -30,6 +36,7 @@ class MLAModules:
     topk_indices_buffer: torch.Tensor | None
     indexer_rotary_emb: torch.nn.Module | None = None
     g_proj: torch.nn.Module | None = None
+    index_group_builder: "SparseMLAIndexGroupBuilder | None" = None
 
 
 # --8<-- [start:multi_head_latent_attention]
@@ -128,6 +135,7 @@ class MultiHeadLatentAttentionWrapper(PluggableLayer):
             use_sparse=self.is_sparse,
             indexer=self.indexer,
             topk_indices_buffer=mla_modules.topk_indices_buffer,
+            index_group_builder=mla_modules.index_group_builder,
             non_causal_multi_token_decode=non_causal_multi_token_decode,
         )
 
@@ -213,6 +221,8 @@ class MultiHeadLatentAttentionWrapper(PluggableLayer):
 
         if self.indexer and self.is_sparse and not self.skip_topk:
             self.indexer(hidden_states, q_c, positions, self.indexer_rope_emb)
+        if self.is_sparse:
+            self.mla_attn.impl.record_logical_topk_ready()  # type: ignore[attr-defined]
 
         if llama_4_scaling is not None:
             q *= llama_4_scaling

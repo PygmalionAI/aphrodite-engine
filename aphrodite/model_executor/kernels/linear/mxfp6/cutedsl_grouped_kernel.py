@@ -1257,22 +1257,15 @@ class Sm100GroupedBlockScaledGemmKernel:
                                 ab_consumer_state.index,
                             )
 
-                            # Set SFA/SFB tensor to tiled_mma
+                            # Bind scale tensors as auxiliary GEMM operands,
+                            # matching the CuTe DSL 4.8 block-scaled interface.
                             sf_kblock_coord = (None, None, kblock_idx)
-                            tiled_mma.set(
-                                tcgen05.Field.SFA,
-                                tCtSFA[sf_kblock_coord].iterator,
-                            )
-                            tiled_mma.set(
-                                tcgen05.Field.SFB,
-                                tCtSFB[sf_kblock_coord].iterator,
-                            )
 
                             cute.gemm(
                                 tiled_mma,
                                 tCtAcc,
-                                tCrA[kblock_coord],
-                                tCrB[kblock_coord],
+                                [tCrA[kblock_coord], tCtSFA[sf_kblock_coord]],
+                                [tCrB[kblock_coord], tCtSFB[sf_kblock_coord]],
                                 tCtAcc,
                             )
 

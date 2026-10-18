@@ -22,7 +22,7 @@
 #include <torch/all.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include "cuda_compat.h"
+#include "core/cuda_compat.h"
 #include <ATen/cuda/CUDAContext.h>
 
 #define HOST_DEVICE_FUNC __host__ __device__

@@ -22,6 +22,7 @@ from aphrodite.distributed import (
 from aphrodite.model_executor.layers.attention import Attention
 from aphrodite.model_executor.layers.fused_moe import (
     FusedMoEFactory,
+    GateLinear,
     fused_moe_make_expert_params_mapping,
 )
 from aphrodite.model_executor.layers.fused_moe.config import FusedMoEParallelConfig
@@ -29,7 +30,6 @@ from aphrodite.model_executor.layers.fused_moe.routed_experts import RoutedExper
 from aphrodite.model_executor.layers.layernorm import RMSNorm
 from aphrodite.model_executor.layers.linear import (
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from aphrodite.model_executor.layers.logits_processor import LogitsProcessor
@@ -43,6 +43,7 @@ from aphrodite.model_executor.layers.vocab_parallel_embedding import (
 )
 from aphrodite.model_executor.model_loader.weight_utils import (
     default_weight_loader,
+    make_attention_sink,
     maybe_remap_kv_scale_name,
     remap_moe_expert_weights,
 )
@@ -76,6 +77,8 @@ _GPT_OSS_STREAMED_EXPERT_SUFFIX_TO_SHARD = {
     "w2_bias": "gpt_oss_w2",
     "w13_weight_scale": "gpt_oss_w13",
     "w2_weight_scale": "gpt_oss_w2",
+    "w13_weight_packed": "gpt_oss_w13",
+    "w2_weight_packed": "gpt_oss_w2",
 }
 
 
@@ -123,7 +126,7 @@ class OAIAttention(nn.Module):
 
         tp_size = get_tensor_model_parallel_world_size()
 
-        self.sinks = torch.nn.Parameter(torch.empty(config.num_attention_heads // tp_size, requires_grad=False))
+        self.sinks = make_attention_sink(config.num_attention_heads // tp_size)
 
         self.q_size = self.num_attention_heads * self.head_dim // tp_size
         self.kv_size = self.num_key_value_heads * self.head_dim // tp_size
@@ -251,7 +254,7 @@ class GptOssRoutedExperts(RoutedExperts):
     ) -> None:
         tp_rank = self.moe_config.moe_parallel_config.tp_rank
         is_w13 = shard_id == "gpt_oss_w13"
-        is_weight = weight_name.endswith("_weight")
+        is_weight = weight_name.endswith(("_weight", "_weight_packed"))
         is_partitioned_scale = weight_name.endswith("_weight_scale")
 
         if is_weight:
@@ -331,6 +334,7 @@ class GptOssRoutedExperts(RoutedExperts):
         ) or quant_method_name in (
             "CompressedTensorsW4A4Nvfp4MoEMethod",
             "Nvfp4OnlineMoEMethod",
+            "CompressedTensorsWNA16MoEMethod",
         ):
             self._load_packed_expert(expert_data, loaded_weight, weight_name, shard_id)
         else:
@@ -358,11 +362,10 @@ class MLPBlock(torch.nn.Module):
         self.hidden_size = config.hidden_size
         self.experts_per_token = config.num_experts_per_tok
         self.world_size = dist.get_world_size() if dist.is_initialized() else 1
-        self.router = ReplicatedLinear(
+        self.router = GateLinear(
             config.hidden_size,
             config.num_local_experts,
             bias=True,
-            quant_config=None,
             prefix=f"{prefix}.router",
             return_bias=False,
         )
@@ -531,8 +534,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
         self,
         ep_rank_end: int,
         ep_rank_start: int,
-        heads_per_rank: int,
-        head_start: int,
         weights: Iterable[tuple[str, torch.Tensor]],
         stacked_params_mapping: list[tuple[str, str, str]],
     ) -> set[str]:
@@ -686,13 +687,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
                 weight_loader(param, weight, weight_name=name, shard_id=None, expert_id=None)
                 loaded_params.add(name)
                 continue
-            elif "sinks" in name:
-                # Handle attention sinks (distributed across ranks)
-                param = params_dict[name]
-                narrow_weight = weight.narrow(0, head_start, heads_per_rank)
-                param.data.copy_(narrow_weight)
-                loaded_params.add(name)
-                continue
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -718,8 +712,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
         self,
         ep_rank_end: int,
         ep_rank_start: int,
-        heads_per_rank: int,
-        head_start: int,
         weights: Iterable[tuple[str, torch.Tensor]],
         stacked_params_mapping: list[tuple[str, str, str]],
     ) -> set[str]:
@@ -758,6 +750,7 @@ class GptOssModel(nn.Module, EagleModelMixin):
 
             Returns:
                 Weight dtype string (e.g., "mxfp4", "fp8") or None if not available
+
             """
             if hasattr(self.layers[layer_id].mlp.experts._quant_method, "weight_dtype"):
                 return self.layers[layer_id].mlp.experts._quant_method.weight_dtype
@@ -1011,14 +1004,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
                 loaded_params.add(fused_name)
                 continue
 
-            elif "sinks" in name:
-                # Handle attention sinks (distributed across ranks)
-                param = params_dict[name]
-                narrow_weight = loaded_weight.narrow(0, head_start, heads_per_rank)
-                param.data.copy_(narrow_weight)
-                loaded_params.add(name)
-                continue
-
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 # Skip non-stacked layers and experts (experts handled below).
                 if weight_name not in name:
@@ -1091,8 +1076,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
         self,
         ep_rank_end: int,
         ep_rank_start: int,
-        heads_per_rank: int,
-        head_start: int,
         weights: Iterable[tuple[str, torch.Tensor]],
         stacked_params_mapping: list[tuple[str, str, str]],
     ) -> set[str]:
@@ -1179,13 +1162,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
                 param.copy_(weight)
                 loaded_params.add(name)
                 continue
-            elif "sinks" in name:
-                # Handle attention sinks (distributed across ranks)
-                param = params_dict[name]
-                narrow_weight = weight.narrow(0, head_start, heads_per_rank)
-                param.data.copy_(narrow_weight)
-                loaded_params.add(name)
-                continue
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
                     continue
@@ -1266,13 +1242,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
             (".qkv_proj", ".v_proj", "v"),
         ]
 
-        tp_rank = get_tensor_model_parallel_rank()
-        tp_size = get_tensor_model_parallel_world_size()
-
-        # Attention heads per rank
-        heads_per_rank = self.config.num_attention_heads // tp_size
-        head_start = tp_rank * heads_per_rank
-
         ep_size = get_ep_group().world_size
         ep_rank = get_ep_group().rank_in_group
         num_experts = self.config.num_local_experts
@@ -1302,8 +1271,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
             return self._load_weights_mxfp4(
                 ep_rank_end,
                 ep_rank_start,
-                heads_per_rank,
-                head_start,
                 weights,
                 stacked_params_mapping,
             )
@@ -1311,8 +1278,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
             return self._load_weights_quark(
                 ep_rank_end,
                 ep_rank_start,
-                heads_per_rank,
-                head_start,
                 weights,
                 stacked_params_mapping,
             )
@@ -1320,8 +1285,6 @@ class GptOssModel(nn.Module, EagleModelMixin):
             return self._load_weights_other(
                 ep_rank_end,
                 ep_rank_start,
-                heads_per_rank,
-                head_start,
                 weights,
                 stacked_params_mapping,
             )
@@ -1396,6 +1359,9 @@ class GptOssForCausalLM(nn.Module, SupportsPP, SupportsEagle, SupportsEagle3, Su
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head, hidden_states)
         return logits
+
+    def compute_logits_local(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        return self.logits_processor(self.lm_head, hidden_states, skip_gather=True)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)

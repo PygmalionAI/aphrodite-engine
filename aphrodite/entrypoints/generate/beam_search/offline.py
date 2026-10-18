@@ -2,13 +2,14 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import itertools
+import math
 from collections.abc import Callable, Sequence
 
 import torch
 from tqdm import tqdm
 
 from aphrodite import RequestOutput, TextPrompt, TokensPrompt
-from aphrodite.entrypoints.offline_utils import OfflineInferenceMixin
+from aphrodite.entrypoints.common.offline import OfflineInferenceMixin
 from aphrodite.logger import init_logger
 from aphrodite.lora.request import LoRARequest
 from aphrodite.pooling_params import PoolingParams
@@ -53,7 +54,7 @@ def _bitmask_to_token_ids(bitmask_row: torch.Tensor, vocab_size: int) -> list[in
 
 
 class BeamSearchOfflineMixin(OfflineInferenceMixin):
-    """Offline inference for beam search"""
+    """Offline inference for beam search."""
 
     def beam_search(
         self,
@@ -63,8 +64,7 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
         use_tqdm: bool = False,
         concurrency_limit: int | None = None,
     ) -> list[BeamSearchOutput]:
-        """
-        Generate sequences using beam search.
+        """Generate sequences using beam search.
 
         Args:
             prompts: A list of prompts. Each prompt can be a string or a list
@@ -74,6 +74,7 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
             use_tqdm: Whether to use tqdm to display the progress bar.
             concurrency_limit: The maximum number of concurrent requests.
                 If None, the number of concurrent requests is unlimited.
+
         """
         # TODO: how does beam search work together with length penalty,
         # frequency, penalty, and stopping criteria, etc.?
@@ -82,6 +83,7 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
         temperature = params.temperature
         ignore_eos = params.ignore_eos
         length_penalty = params.length_penalty
+        self.llm_engine.input_processor.resolve_watermarking(params)
 
         tokenizer = self.renderer.get_tokenizer()
         eos_token_id = tokenizer.eos_token_id
@@ -100,12 +102,6 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
         structured_output_backend: StructuredOutputBackend | None = None
         structured_output_key = None
         structured_output_bitmask = None
-        if params.structured_outputs is not None:
-            (
-                structured_output_backend,
-                structured_output_key,
-                structured_output_bitmask,
-            ) = self._init_beam_search_structured_output(params.structured_outputs, tokenizer)
 
         # generate 2 * beam_width candidates at each step
         # following the huggingface transformers implementation
@@ -114,9 +110,18 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
             logprobs=2 * beam_width,
             max_tokens=1,
             temperature=temperature,
+            watermarking=False,
             detokenize=False,
             skip_clone=True,  # Internal beam search, safe to skip clone
         )
+        params.configure_logprobs(base_sampling_params, self.llm_engine.input_processor.aphrodite_config)
+        if params.structured_outputs is not None:
+            (
+                structured_output_backend,
+                structured_output_key,
+                structured_output_bitmask,
+            ) = self._init_beam_search_structured_output(params.structured_outputs, tokenizer)
+
         instances: list[BeamSearchInstance] = []
 
         for lora_req, prompt in zip(lora_requests, engine_inputs):
@@ -174,7 +179,7 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
             best_beams = sorted_completed[:beam_width]
 
             for beam in best_beams:
-                beam.text = tokenizer.decode(beam.tokens)
+                beam.text = tokenizer.decode(beam.tokens, skip_special_tokens=params.skip_special_tokens)
 
             outputs.append(BeamSearchOutput(sequences=best_beams))
 
@@ -263,13 +268,25 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
         # tokens outside the grammar's allowed set. This filtering is also
         # the only grammar enforcement for beams whose allowed set exceeds
         # the engine-side allowed_token_ids cap.
-        allowed_sets: list[set[int] | None] = [None] * len(all_beams)
+        request_allowed = (
+            set(base_sampling_params.logprob_token_ids) if base_sampling_params.logprob_token_ids is not None else None
+        )
+        allowed_sets: list[set[int] | None] = [request_allowed] * len(all_beams)
         if structured_output_backend is not None:
             for i, entry in enumerate(beam_entries):
                 if entry is not None:
                     allowed_sets[i] = set(entry[1])
 
         for (start, end), instance in zip(instance_start_and_end, instances_batch):
+            instance_output = output[start:end]
+            if any(result is not None and result.outputs[0].finish_reason == "abort" for result in instance_output):
+                for beam, result in zip(all_beams[start:end], instance_output):
+                    if result is not None:
+                        beam.finish_reason = "abort"
+                        instance.completed.append(beam)
+                instance.beams = []
+                continue
+
             instance_new_beams = []
             for i in range(start, end):
                 current_beam = all_beams[i]
@@ -279,9 +296,19 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
                     continue
 
                 if result.outputs[0].logprobs is not None:
-                    # if logprobs is None, the sequence completed
-                    # due to max-model-len or abortion.
                     logprobs = result.outputs[0].logprobs[0]
+                    if request_allowed is not None:
+                        logprobs = {
+                            token: score
+                            for token, score in sorted(
+                                logprobs.items(),
+                                key=lambda item: item[1].logprob,
+                                reverse=True,
+                            )
+                            if token in request_allowed and math.isfinite(score.logprob)
+                        }
+                        for score in logprobs.values():
+                            score.rank = None
                     allowed = allowed_sets[i]
                     for token_id, logprob_obj in logprobs.items():
                         if allowed is not None and token_id not in allowed:
@@ -421,6 +448,7 @@ class BeamSearchOfflineMixin(OfflineInferenceMixin):
                 logprobs=base_params.logprobs,
                 max_tokens=1,
                 temperature=base_params.temperature,
+                watermarking=base_params.watermarking,
                 detokenize=False,
                 allowed_token_ids=(allowed_ids if len(allowed_ids) <= _MAX_NUM_ALLOWED_TOKEN_IDS else None),
                 skip_clone=True,

@@ -73,6 +73,7 @@ def _set_conv_state_layout(monkeypatch, layout: str) -> None:
 def test_models(
     hf_runner,
     aphrodite_runner,
+    gpu_memory_cleared,
     example_prompts,
     monkeypatch,
     model: str,
@@ -154,8 +155,7 @@ def test_chunked_prefill_with_parallel_sampling(
     max_tokens: int,
     conv_state_layout: str,
 ) -> None:
-    """
-    Tests chunked prefill in conjunction with n > 1.
+    """Tests chunked prefill in conjunction with n > 1.
 
     In this case, prefill is populated with decoding tokens and
     we test that it doesn't fail.
@@ -189,8 +189,7 @@ def test_mamba_cache_cg_padding(
     max_tokens: int,
     conv_state_layout: str,
 ) -> None:
-    """
-    This test is for verifying that mamba cache is padded to CG captured
+    """This test is for verifying that mamba cache is padded to CG captured
     batch size. If it's not, a torch RuntimeError will be raised because
     tensor dimensions aren't compatible.
     """
@@ -221,8 +220,7 @@ def test_fail_upon_inc_requests_and_finished_requests_lt_available_blocks(
     example_prompts,
     model: str,
 ) -> None:
-    """
-    This test is for verifying that the hybrid inner state management doesn't
+    """This test is for verifying that the hybrid inner state management doesn't
     collapse in case where the number of incoming requests and
     finished_requests_ids is larger than the maximum mamba block capacity.
 
@@ -245,8 +243,7 @@ def test_state_cleanup(
     example_prompts,
     model: str,
 ) -> None:
-    """
-    This test is for verifying that the Hybrid state is cleaned up between
+    """This test is for verifying that the Hybrid state is cleaned up between
     steps.
 
     If it's not cleaned, an error would be expected.
@@ -316,10 +313,13 @@ def test_full_cuda_graph(
     with hf_runner(model) as hf_model:
         hf_outputs = hf_model.generate_greedy_logprobs_limit(example_prompts, max_tokens, num_logprobs)
 
+    # Leave headroom for the HF model that ran earlier in this process on a
+    # 32.5 GiB MIG.
     with aphrodite_runner(
         model,
         max_num_seqs=MAX_NUM_SEQS,
         attention_backend=ATTN_BACKEND,
+        gpu_memory_utilization=0.9,
         enable_chunked_prefill=True,
     ) as aphrodite_model:
         aphrodite_outputs = aphrodite_model.generate_greedy_logprobs(example_prompts, max_tokens, num_logprobs)

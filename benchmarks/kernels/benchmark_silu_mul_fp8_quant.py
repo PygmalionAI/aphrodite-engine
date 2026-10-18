@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""
-Comprehensive 3-way SiLU Benchmark Suite
+
+"""Comprehensive 3-way SiLU Benchmark Suite.
 
 This benchmark compares three SiLU implementations:
 1. SiLU V2 (CUDA) - Optimized CUDA kernel implementation
@@ -18,10 +18,10 @@ from collections.abc import Callable
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from aphrodite.modeling.layers.fused_moe.batched_deep_gemm_moe import (
+
+from aphrodite.model_executor.layers.fused_moe.experts.batched_deep_gemm_moe import (
     persistent_masked_m_silu_mul_quant,
 )
-
 from aphrodite.platforms import current_platform
 from aphrodite.triton_utils import tl, triton
 from aphrodite.utils.deep_gemm import is_deep_gemm_e8m0_used
@@ -107,7 +107,7 @@ def silu_mul_fp8_quant_deep_gemm_triton(
     eps: float = 1e-10,
     expert_offsets: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Quantize silu(y[..., :H]) * y[..., H:] to FP8 with group per-token scales
+    """Quantize silu(y[..., :H]) * y[..., H:] to FP8 with group per-token scales.
 
     y has shape (E, T, 2*H). The first half of the last dimension is
     silu-activated, multiplied by the second half, then quantized into FP8.
@@ -201,7 +201,7 @@ def benchmark(
     iterations_per_run: int = 20,
 ):
     def generate_data(seed_offset=0):
-        """Generate input data with given seed offset"""
+        """Generate input data with given seed offset."""
         current_platform.seed_everything(42 + seed_offset)
         y = torch.rand((E, T, 2 * H), dtype=torch.bfloat16, device="cuda").contiguous()
 

@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-from typing import cast
+from typing import assert_never, cast
 
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from typing_extensions import assert_never
 
-from aphrodite.exceptions import APHRODITEValidationError
+from aphrodite.exceptions import AphroditeValidationError
 from aphrodite.logger import init_logger
 from aphrodite.outputs import PoolingRequestOutput
 from aphrodite.tasks import SupportedTask
@@ -61,7 +60,7 @@ class ServingPooling(PoolingBaseServing):
 
     def _verify_pooling_task(self, request: PoolingRequest) -> str:
         if getattr(request, "dimensions", None) is not None:
-            raise APHRODITEValidationError("dimensions is currently not supported", parameter="dimensions")
+            raise AphroditeValidationError("dimensions is currently not supported", parameter="dimensions")
 
         if request.task is None:
             request.task = self.pooling_task
@@ -75,18 +74,18 @@ class ServingPooling(PoolingBaseServing):
         # plugin task uses io_processor.parse_data to verify inputs
         if pooling_task != "plugin" and pooling_task != self.pooling_task:
             if pooling_task not in self.supported_tasks:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"Unsupported task: {pooling_task!r} Supported tasks: {self.supported_tasks}",
                     parameter="task",
                 )
             else:
-                raise APHRODITEValidationError(
+                raise AphroditeValidationError(
                     f"Try switching the model's pooling_task via --pooler-config.task {request.task}.",
                     parameter="task",
                 )
 
         if pooling_task == "plugin" and "plugin" not in self.io_processors:
-            raise APHRODITEValidationError(
+            raise AphroditeValidationError(
                 "No IOProcessor plugin installed. Please refer "
                 "to the documentation and to the "
                 "'prithvi_geospatial_mae_io_processor' "

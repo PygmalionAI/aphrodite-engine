@@ -7,7 +7,6 @@ from typing import Any
 
 from openai.types.responses.function_tool import FunctionTool
 
-from aphrodite.entrypoints.chat_utils import make_tool_call_id
 from aphrodite.entrypoints.generate.base.protocol import (
     DeltaFunctionCall,
     DeltaMessage,
@@ -22,8 +21,10 @@ from aphrodite.entrypoints.openai.chat_completion.protocol import (
 )
 from aphrodite.entrypoints.openai.responses.protocol import ResponsesRequest
 from aphrodite.logger import init_logger
+from aphrodite.renderers.chat_utils import make_tool_call_id
 from aphrodite.tokenizers import TokenizerLike
 from aphrodite.tool_parsers.abstract_tool_parser import Tool, ToolParser
+from aphrodite.tool_parsers.utils import get_function_tools
 
 logger = init_logger(__name__)
 
@@ -62,7 +63,7 @@ class RustToolParser(ToolParser):
     tool_call_start_token: str | None = None
 
     def __init__(self, tokenizer: TokenizerLike, tools: list[Tool] | None = None):
-        super().__init__(tokenizer, tools)
+        super().__init__(tokenizer, get_function_tools(tools) if tools else None)
         self._parser: Any | None = None
         self._error: Exception | None = None
 
@@ -104,7 +105,11 @@ class RustToolParser(ToolParser):
                 strict = getattr(tool.function, "strict", None)
             else:
                 continue
-            tools.append(_rust_tool_parser_module().Tool(name, description, parameters, strict))
+            tools.append(
+                _rust_tool_parser_module().Tool(
+                    name, description, parameters, strict, getattr(tool, "defer_loading", None)
+                )
+            )
         return tools
 
     def _new_parser(self) -> Any:
@@ -277,7 +282,6 @@ class RustToolParser(ToolParser):
         the newest text delta and lets the serving layer handle final empty
         chunks.
         """
-        # TODO: Add a final-chunk hook if streaming needs to call Rust finish().
         if not previous_text:
             self._reset_streaming_state()
 

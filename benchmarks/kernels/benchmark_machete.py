@@ -14,23 +14,23 @@ from itertools import product
 import pandas as pd
 import torch
 import torch.utils.benchmark as TBenchmark
-from aphrodite.quantization.utils.marlin_utils import (
+from torch.utils.benchmark import Measurement as TMeasurement
+from weight_shapes import WEIGHT_SHAPES
+
+from aphrodite import _custom_ops as ops
+from aphrodite.model_executor.layers.quantization.utils.marlin_utils import (
     GPTQ_MARLIN_MAX_PARALLEL,
     GPTQ_MARLIN_MIN_THREAD_N,
     marlin_permute_scales,
     marlin_zero_points,
 )
-from aphrodite.quantization.utils.marlin_utils_test import (
+from aphrodite.model_executor.layers.quantization.utils.marlin_utils_test import (
     MarlinWorkspace,
 )
-from aphrodite.quantization.utils.quant_utils import (
+from aphrodite.model_executor.layers.quantization.utils.quant_utils import (
     pack_rows,
     quantize_weights,
 )
-from torch.utils.benchmark import Measurement as TMeasurement
-from weight_shapes import WEIGHT_SHAPES
-
-from aphrodite import _custom_ops as ops
 from aphrodite.scalar_type import ScalarType, scalar_types
 from aphrodite.utils.argparse_utils import FlexibleArgumentParser
 
@@ -201,9 +201,7 @@ def marlin_create_bench_fn(bt: BenchmarkTensors) -> Callable:
     else:
         w_s = marlin_permute_scales(bt.w_g_s, bt.w_ref.shape[0], bt.w_ref.shape[1], bt.group_size)
 
-    sort_indices = torch.empty(0, dtype=torch.int, device=device)
-    g_idx = torch.empty(0, dtype=torch.int, device=device)
-    w_q = ops.gptq_marlin_repack(bt.w_q, sort_indices, bt.w_ref.shape[0], bt.w_ref.shape[1], bt.wtype.size_bits)
+    w_q = ops.gptq_marlin_repack(bt.w_q, bt.w_ref.shape[0], bt.w_ref.shape[1], bt.wtype.size_bits)
 
     if bt.a.dtype.is_floating_point:
         assert bt.w_ch_s is None
@@ -218,14 +216,11 @@ def marlin_create_bench_fn(bt: BenchmarkTensors) -> Callable:
             b_scales=w_s,
             global_scale=None,
             b_zeros=w_zp,
-            g_idx=g_idx,
-            perm=sort_indices,
             workspace=workspace.scratch,
             b_q_type=bt.wtype,
             size_m=bt.a.shape[0],
             size_n=bt.w_ref.shape[1],
             size_k=bt.w_ref.shape[0],
-            is_k_full=True,
             is_zp_float=False,
         )
     else:

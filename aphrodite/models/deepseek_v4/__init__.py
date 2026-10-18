@@ -17,6 +17,7 @@ from .quant_config import DeepseekV4FP8Config
 # default that mypy sees; the ROCm/XPU branches override at runtime and are
 # kept type-compatible via ``# type: ignore[assignment]``.
 if TYPE_CHECKING:
+    from .common.vl_model import DeepseekV4ForConditionalGeneration
     from .nvidia.dspark import DSparkDeepseekV4ForCausalLM
     from .nvidia.model import DeepseekV4ForCausalLM
     from .nvidia.mtp import DeepSeekV4MTP
@@ -26,7 +27,7 @@ elif current_platform.is_rocm():
     )
     from .amd.model import DeepseekV4ForCausalLM
     from .amd.mtp import DeepSeekV4MTP
-    from .vl_stub import (  # type: ignore[assignment]
+    from .common.vl_model import (  # type: ignore[assignment]
         DeepseekV4ForConditionalGeneration,
     )
 elif current_platform.is_xpu():
@@ -36,15 +37,22 @@ elif current_platform.is_xpu():
     from .xpu.dspark import DSparkDeepseekV4ForCausalLM  # type: ignore[assignment]
     from .xpu.model import DeepseekV4ForCausalLM  # type: ignore[assignment]
     from .xpu.mtp import DeepSeekV4MTP  # type: ignore[assignment]
+elif current_platform.is_cpu():
+    from .cpu.dspark import DSparkDeepseekV4ForCausalLM  # type: ignore[assignment]
+    from .cpu.model import DeepseekV4ForCausalLM  # type: ignore[assignment]
+    from .cpu.mtp import DeepSeekV4MTP  # type: ignore[assignment]
+    from .vl_stub import (  # type: ignore[assignment]
+        DeepseekV4ForConditionalGeneration,
+    )
 else:
+    from .common.vl_model import (  # type: ignore[assignment]
+        DeepseekV4ForConditionalGeneration,
+    )
     from .nvidia.dspark import (  # type: ignore[assignment]
         DSparkDeepseekV4ForCausalLM,
     )
     from .nvidia.model import DeepseekV4ForCausalLM  # type: ignore[assignment]
     from .nvidia.mtp import DeepSeekV4MTP  # type: ignore[assignment]
-    from .nvidia.vl_model import (  # type: ignore[assignment]
-        DeepseekV4ForConditionalGeneration,
-    )
 
 __all__ = [
     "DSparkDeepseekV4ForCausalLM",

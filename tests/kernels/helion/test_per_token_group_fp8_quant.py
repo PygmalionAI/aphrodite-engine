@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Tests for the per_token_group_fp8_quant helion kernel
+"""Tests for the per_token_group_fp8_quant helion kernel.
 
 Run `pytest tests/kernels/helion/test_per_token_group_fp8_quant.py`.
 """
@@ -99,7 +99,7 @@ class TestPerTokenGroupFp8QuantConfigPicker:
         assert selected_key == CaseKey({"hidden_size": 2048, "group_size": 64, "num_tokens": 32})
 
     def test_config_picker_no_configs(self):
-        config_keys: list[dict] = []
+        config_keys: list[CaseKey] = []
 
         args = _generate_fake_input(16, 4096, 128)
         selected_key = pick_config(args, config_keys)
@@ -206,14 +206,3 @@ class TestPerTokenGroupFp8QuantIntegration:
         assert kernel_wrapper.op_name == "per_token_group_fp8_quant"
         assert kernel_wrapper._config_picker is not None
         assert kernel_wrapper._mutates_args == ["output_q", "output_s"]
-
-    def test_fake_impl_functionality(self):
-        skip_if_platform_unsupported("per_token_group_fp8_quant")
-        from aphrodite.kernels.helion.register import get_registered_kernels
-
-        registered_kernels = get_registered_kernels()
-        kernel_wrapper = registered_kernels["per_token_group_fp8_quant"]
-        fake_impl = kernel_wrapper._fake_impl
-
-        args = _generate_fake_input(16, 4096, 128)
-        assert fake_impl(*args) is None

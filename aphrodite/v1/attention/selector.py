@@ -36,6 +36,7 @@ class AttentionSelectorConfig(NamedTuple):
     use_pcp: bool = False
     use_adaptive_verification: bool = False
     use_dcp: bool = False
+    use_rswa: bool = False
 
     def __repr__(self):
         return (
@@ -55,7 +56,8 @@ class AttentionSelectorConfig(NamedTuple):
             f"use_kv_connector={self.use_kv_connector}, "
             f"use_adaptive_verification={self.use_adaptive_verification}, "
             f"use_pcp={self.use_pcp}, "
-            f"use_dcp={self.use_dcp})"
+            f"use_dcp={self.use_dcp}, "
+            f"use_rswa={self.use_rswa})"
         )
 
 
@@ -83,6 +85,7 @@ def get_attn_spec_kind(
 
     Returns:
         The ``KVCacheSpecKind`` the layer maps to.
+
     """
     from aphrodite.v1.kv_cache_interface import KVCacheSpecKind
 
@@ -113,7 +116,6 @@ def get_attn_backend(
     has_sliding_window: bool = False,
 ) -> type[AttentionBackend]:
     """Selects which attention backend to use and lazily imports it."""
-
     if kv_cache_dtype is not None:
         valid_cache_dtypes = get_args(CacheDType)
         assert kv_cache_dtype in valid_cache_dtypes, (
@@ -162,6 +164,7 @@ def get_attn_backend(
         use_pcp=aphrodite_config.parallel_config.prefill_context_parallel_size > 1,
         use_adaptive_verification=use_adaptive_verification,
         use_dcp=aphrodite_config.parallel_config.decode_context_parallel_size > 1,
+        use_rswa=(aphrodite_config.model_config is not None and aphrodite_config.model_config.rswa_window is not None),
     )
 
     attention_config = aphrodite_config.attention_config
@@ -180,6 +183,7 @@ def get_attn_backend(
         backend=backend,
         attn_selector_config=attn_selector_config,
         num_heads=num_heads,
+        _run_kv_cache_dtype=(cache_config.cache_dtype if cache_config is not None else None),
     )
 
 
@@ -188,7 +192,11 @@ def _cached_get_attn_backend(
     backend,
     attn_selector_config: AttentionSelectorConfig,
     num_heads: int | None = None,
+    *,
+    _run_kv_cache_dtype: CacheDType | None = None,
 ) -> type[AttentionBackend]:
+    # Some platform selectors inspect the run-wide cache dtype. Keep it in the
+    # cache key even though they read the value from the current config.
     from aphrodite.platforms import current_platform
 
     attention_cls = current_platform.get_attn_backend_cls(

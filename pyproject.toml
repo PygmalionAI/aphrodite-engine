@@ -4,12 +4,12 @@ requires = [
     "cmake>=3.26.1",
     "ninja",
     "packaging>=24.2",
-    "setuptools>=77.0.3,<81.0.0",
+    "setuptools>=78.1.1,<81.0.0",
     "setuptools-scm>=8.0",
     "setuptools-rust>=1.9.0",
-    "torch == 2.13.0",
+    "torch == 2.14.0",
     "wheel",
-    "jinja2",
+    "jinja2>=3.1.6",
     "mlx>=0.31.0,<0.32.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
     "nanobind==2.10.2; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]
@@ -22,7 +22,6 @@ license = { file = "LICENSE" }
 readme = "README.md"
 description = "Serving LLMs at Scale"
 classifiers = [
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -33,7 +32,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.11,<3.15"
 dynamic = [ "version", "dependencies", "optional-dependencies"]
 
 [project.urls]
@@ -149,6 +148,7 @@ ignore-hidden = false
 
 [tool.typos.default]
 extend-ignore-identifiers-re = [".*[Uu][Ee][0-9][Mm][0-9].*"]
+extend-ignore-re = ["Un beau coucher de soleil sur la plage"]
 
 [tool.typos.default.extend-identifiers]
 a63ede7 = "a63ede7"
@@ -260,3 +260,8 @@ Weghts = "Weghts"
 
 [tool.uv]
 no-build-isolation-package = ["torch"]
+# Aphrodite depends on oss-harmony, a fork that ships the same `openai_harmony`
+# module without downloading tiktoken vocabularies at runtime. Installing
+# openai-harmony alongside it silently overwrites those files, so keep it out
+# of every resolution; gpt-oss pulls it in transitively.
+exclude-dependencies = ["openai-harmony"]

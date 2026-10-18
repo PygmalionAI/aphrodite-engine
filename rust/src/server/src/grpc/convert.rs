@@ -4,106 +4,44 @@
 //! Conversion between gRPC protobuf types and internal `aphrodite-text`
 //! request/response types.
 
-use tonic::Status;
-use url::Url;
-use uuid::Uuid;
-use aphrodite_chat::MediaContentPart;
+use aphrodite_engine_core_client::protocol::kv_hints::{KvHintAction, KvHintsEnvelope};
 use aphrodite_engine_core_client::protocol::output::StopReason;
+use aphrodite_engine_core_client::protocol::request::ReasoningParserKwargs;
 use aphrodite_engine_core_client::protocol::structured_outputs::StructuredOutputsParams;
 use aphrodite_text::{
     DecodedLogprobs, DecodedPromptLogprobs, FinishReason, Finished, Prompt, PromptTruncation,
     PromptTruncationLimit, SamplingParams, TextDecodeOptions, TextRequest, TruncationSide,
 };
+use thiserror_ext::AsReport as _;
+use tonic::Status;
+use uuid::Uuid;
 
 use super::pb;
 
-pub fn media_parts_from_request(
-    media: Vec<pb::MediaItem>,
-) -> Result<Vec<MediaContentPart>, Status> {
-    let mut parts = Vec::with_capacity(media.len());
-    for (index, item) in media.into_iter().enumerate() {
-        let modality = item.modality();
-        if modality == pb::Modality::Unspecified {
-            return Err(Status::invalid_argument(format!(
-                "media[{index}].modality is required"
-            )));
-        }
-        let uuid = (!item.uuid.is_empty()).then_some(item.uuid);
-        let mime_type = (!item.mime_type.is_empty()).then_some(item.mime_type);
-        let source = item.source.ok_or_else(|| {
-            Status::invalid_argument(format!("media[{index}].source is required"))
-        })?;
-        match &source {
-            pb::media_item::Source::Url(url) => {
-                validate_media_uri(index, "url", url, &["http", "https"])?;
-            }
-            pb::media_item::Source::DataUri(uri) => {
-                validate_media_uri(index, "data_uri", uri, &["data"])?;
-            }
-            pb::media_item::Source::RawBytes(_) => {}
-        }
-        let part = match (modality, source) {
-            (
-                pb::Modality::Image,
-                pb::media_item::Source::Url(url) | pb::media_item::Source::DataUri(url),
-            ) => MediaContentPart::ImageUrl {
-                url,
-                detail: None,
-                uuid,
-            },
-            (pb::Modality::Image, pb::media_item::Source::RawBytes(data)) => {
-                MediaContentPart::ImageData {
-                    data,
-                    mime_type,
-                    uuid,
-                    detail: None,
-                }
-            }
-            (
-                pb::Modality::Video,
-                pb::media_item::Source::Url(url) | pb::media_item::Source::DataUri(url),
-            ) => MediaContentPart::VideoUrl { url, uuid },
-            (pb::Modality::Video, pb::media_item::Source::RawBytes(data)) => {
-                MediaContentPart::VideoData {
-                    data,
-                    mime_type,
-                    uuid,
-                }
-            }
-            (
-                pb::Modality::Audio,
-                pb::media_item::Source::Url(url) | pb::media_item::Source::DataUri(url),
-            ) => MediaContentPart::AudioUrl { url, uuid },
-            (pb::Modality::Audio, pb::media_item::Source::RawBytes(data)) => {
-                MediaContentPart::AudioData {
-                    data,
-                    mime_type,
-                    uuid,
-                }
-            }
-            (pb::Modality::Unspecified, _) => unreachable!("modality validated above"),
-        };
-        parts.push(part);
+fn kv_hints_from_proto(hints: pb::KvHintsEnvelope) -> KvHintsEnvelope {
+    KvHintsEnvelope {
+        protocol_version: hints.protocol_version,
+        message_id: hints.message_id,
+        actions: hints
+            .actions
+            .into_iter()
+            .map(|action| KvHintAction {
+                action_id: action.action_id,
+                action_type: action.action_type,
+                action_version: action.action_version,
+                payload: action
+                    .payload
+                    .map(|payload| {
+                        payload
+                            .fields
+                            .into_iter()
+                            .map(|(key, value)| (key, proto_value_to_json(&value)))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect(),
     }
-    Ok(parts)
-}
-
-fn validate_media_uri(
-    index: usize,
-    field: &str,
-    value: &str,
-    allowed_schemes: &[&str],
-) -> Result<(), Status> {
-    let uri = Url::parse(value).map_err(|_| {
-        Status::invalid_argument(format!("media[{index}].{field} is not a valid URI"))
-    })?;
-    if !allowed_schemes.contains(&uri.scheme()) {
-        return Err(Status::invalid_argument(format!(
-            "media[{index}].{field} must use the {} scheme",
-            allowed_schemes.join(" or ")
-        )));
-    }
-    Ok(())
 }
 
 // ========================================================================================
@@ -146,6 +84,8 @@ pub fn to_text_request(
         req.request_id
     };
     let session_id = req.session_id.filter(|s| !s.is_empty());
+    let kv_hints = req.kv_hints.map(kv_hints_from_proto);
+    let reasoning_gate = req.engine_reasoning_gate.unwrap_or_default();
 
     let sampling = req.sampling.as_ref();
     let decoding = req.decoding.as_ref();
@@ -155,6 +95,9 @@ pub fn to_text_request(
 
     let mut sampling_params =
         build_sampling_params(req.temperature, sampling, decoding, stopping, response)?;
+    sampling_params.watermarking = req.watermarking.unwrap_or(true);
+    sampling_params.aphrodite_sampling =
+        req.aphrodite_sampling.map(aphrodite_sampling_from_proto).unwrap_or_default();
 
     // Thread KVCacheParameters → SamplingParams fields.
     if let Some(kv) = kv {
@@ -197,10 +140,59 @@ pub fn to_text_request(
         add_special_tokens: true,
         data_parallel_rank: None,
         session_id,
-        reasoning_parser_kwargs: None,
+        kv_hints,
+        reasoning_parser_kwargs: ReasoningParserKwargs {
+            chat_template_kwargs: reasoning_gate
+                .chat_template_kwargs
+                .map(|kwargs| {
+                    kwargs.fields.iter().map(|(k, v)| (k.clone(), proto_value_to_json(v))).collect()
+                })
+                .unwrap_or_default(),
+        },
+        reasoning_ended: reasoning_gate.reasoning_ended,
         lora_request: None,
         arrival_time: None,
     })
+}
+
+fn aphrodite_sampling_from_proto(
+    params: pb::AphroditeSamplingParams,
+) -> aphrodite_engine_core_client::protocol::sampling::AphroditeSamplingParams {
+    use aphrodite_engine_core_client::protocol::sampling::AphroditeSamplingParams;
+
+    let defaults = AphroditeSamplingParams::default();
+    AphroditeSamplingParams {
+        no_repeat_ngram_size: params.no_repeat_ngram_size.unwrap_or(defaults.no_repeat_ngram_size),
+        dynatemp_min: params.dynatemp_min.unwrap_or(defaults.dynatemp_min),
+        dynatemp_max: params.dynatemp_max.unwrap_or(defaults.dynatemp_max),
+        dynatemp_exponent: params.dynatemp_exponent.unwrap_or(defaults.dynatemp_exponent),
+        temperature_last: params.temperature_last.unwrap_or(defaults.temperature_last),
+        top_a: params.top_a.unwrap_or(defaults.top_a),
+        tfs: params.tfs.unwrap_or(defaults.tfs),
+        eta_cutoff: params.eta_cutoff.unwrap_or(defaults.eta_cutoff),
+        epsilon_cutoff: params.epsilon_cutoff.unwrap_or(defaults.epsilon_cutoff),
+        typical_p: params.typical_p.unwrap_or(defaults.typical_p),
+        smoothing_factor: params.smoothing_factor.unwrap_or(defaults.smoothing_factor),
+        smoothing_curve: params.smoothing_curve.unwrap_or(defaults.smoothing_curve),
+        xtc_threshold: params.xtc_threshold.unwrap_or(defaults.xtc_threshold),
+        xtc_probability: params.xtc_probability.unwrap_or(defaults.xtc_probability),
+        nsigma: params.nsigma.unwrap_or(defaults.nsigma),
+        mirostat_mode: params.mirostat_mode.unwrap_or(defaults.mirostat_mode),
+        mirostat_tau: params.mirostat_tau.unwrap_or(defaults.mirostat_tau),
+        mirostat_eta: params.mirostat_eta.unwrap_or(defaults.mirostat_eta),
+        dry_multiplier: params.dry_multiplier.unwrap_or(defaults.dry_multiplier),
+        dry_base: params.dry_base.unwrap_or(defaults.dry_base),
+        dry_allowed_length: params.dry_allowed_length.unwrap_or(defaults.dry_allowed_length),
+        dry_sequence_breakers: params.dry_sequence_breakers.map(|breakers| breakers.values),
+        dry_sequence_breaker_ids: params.dry_sequence_breaker_ids,
+        dry_range: params.dry_range.unwrap_or(defaults.dry_range),
+        dry_max_ngram: params.dry_max_ngram.unwrap_or(defaults.dry_max_ngram),
+        dry_max_occurrences: params.dry_max_occurrences.unwrap_or(defaults.dry_max_occurrences),
+        dry_early_exit_match_len: params
+            .dry_early_exit_match_len
+            .unwrap_or(defaults.dry_early_exit_match_len),
+        skew: params.skew.unwrap_or(defaults.skew),
+    }
 }
 
 fn build_sampling_params(
@@ -220,10 +212,7 @@ fn build_sampling_params(
         ..SamplingParams::default()
     };
 
-    // RandomSampling: for every remaining sampling field the protobuf default (`0`)
-    // is treated as "unset" and leaves the resolved value to the lowering
-    // stage, which falls back to the model-provided default or a
-    // neutral/disabled value otherwise.
+    // Preserve explicit values; omitted fields inherit model defaults during lowering.
     if let Some(s) = sampling {
         // num_sequences (n > 1) is not supported yet by the TextLlm layer; the response
         // path also hardcodes SequenceOutput.index = 0, so accepting >1 would silently
@@ -233,15 +222,9 @@ fn build_sampling_params(
                 "num_sequences > 1 is not supported",
             ));
         }
-        if s.top_k != 0 {
-            params.top_k = Some(s.top_k);
-        }
-        if s.top_p != 0.0 {
-            params.top_p = Some(s.top_p);
-        }
-        if s.min_p != 0.0 {
-            params.min_p = Some(s.min_p);
-        }
+        params.top_k = s.top_k;
+        params.top_p = s.top_p;
+        params.min_p = s.min_p;
         params.seed = s.seed;
     }
 
@@ -262,6 +245,10 @@ fn build_sampling_params(
         if !d.allowed_token_ids.is_empty() {
             params.allowed_token_ids = Some(d.allowed_token_ids.clone());
         }
+        if !d.bad_words_token_ids.is_empty() {
+            params.bad_words_token_ids =
+                Some(d.bad_words_token_ids.iter().map(|sequence| sequence.ids.clone()).collect());
+        }
         params.structured_outputs = convert_structured_output(d)?;
     }
 
@@ -277,13 +264,14 @@ fn build_sampling_params(
             params.stop_token_ids = Some(s.stop_token_ids.clone());
         }
         params.ignore_eos = s.ignore_eos;
+        params.thinking_token_budget = s.thinking_token_budget;
     }
 
     // ResponseOptions → logprobs
     if let Some(r) = response {
         if r.output_logprobs {
             let (count, token_ids) = candidate_logprob_spec(r.output_candidates.as_ref());
-            params.logprobs = Some(count);
+            params.logprobs = count;
             params.logprob_token_ids = token_ids;
         }
         if r.prompt_logprobs {
@@ -300,7 +288,7 @@ fn build_sampling_params(
                 ));
             }
             let (count, _) = candidate_logprob_spec(r.prompt_candidates.as_ref());
-            params.prompt_logprobs = Some(count);
+            params.prompt_logprobs = count;
         }
     }
 
@@ -310,18 +298,22 @@ fn build_sampling_params(
 /// Map the proto `CandidateTokens` selector to a `(logprobs_count,
 /// logprob_token_ids)` pair.
 ///
-/// - `top_n(k)` → `(k, None)` — return top-k candidates by probability
-/// - `all` → `(-1, None)` — return the full vocabulary
-/// - `token_ids(n)` → `(1, Some(vec of n token ids))` — return logprobs for specific tokens (the
-///   count `n` is stored in the proto as the number of token IDs that follow, but the actual IDs
-///   are carried via `logprob_token_ids` on `SamplingParams`)
-/// - absent → `(1, None)` — just the sampled/scored token
-fn candidate_logprob_spec(candidates: Option<&pb::CandidateTokens>) -> (i32, Option<Vec<u32>>) {
+/// - `top_n(k)` → `(Some(k), None)` — return top-k candidates by probability
+/// - `all` → `(Some(-1), None)` — return the full vocabulary
+/// - nonempty `token_ids` → `(None, Some(ids))` — let the engine derive the count
+/// - absent or empty `token_ids` → `(Some(0), None)` — return only the sampled/scored token
+fn candidate_logprob_spec(
+    candidates: Option<&pb::CandidateTokens>,
+) -> (Option<i32>, Option<Vec<u32>>) {
     match candidates.and_then(|c| c.select.as_ref()) {
-        Some(pb::candidate_tokens::Select::TopN(n)) => (*n as i32, None),
-        Some(pb::candidate_tokens::Select::All(true)) => (-1, None),
-        Some(pb::candidate_tokens::Select::TokenIds(ids)) => (1, Some(ids.ids.clone())),
-        _ => (1, None),
+        Some(pb::candidate_tokens::Select::TopN(n)) => (Some(*n as i32), None),
+        Some(pb::candidate_tokens::Select::All(true)) => (Some(-1), None),
+        Some(pb::candidate_tokens::Select::TokenIds(ids)) if !ids.ids.is_empty() => {
+            // Match Python HTTP: selected IDs have their own limit, independent
+            // of the numeric top-logprobs count and its max_logprobs cap.
+            (None, Some(ids.ids.clone()))
+        }
+        _ => (Some(0), None),
     }
 }
 
@@ -346,8 +338,13 @@ fn convert_structured_output(
         StructuredOutput::Grammar(grammar) => StructuredOutputsParams::grammar(grammar.clone()),
         StructuredOutput::JsonObject(true) => StructuredOutputsParams::json_object(),
         StructuredOutput::JsonObject(false) => return Ok(None),
-        StructuredOutput::StructuralTag(tag) => StructuredOutputsParams::structural_tag(tag.clone()),
+        StructuredOutput::StructuralTag(tag) => {
+            StructuredOutputsParams::structural_tag(tag.clone())
+        }
     };
+    params
+        .validate()
+        .map_err(|error| Status::invalid_argument(error.to_report_string()))?;
     Ok(Some(params))
 }
 
@@ -389,13 +386,19 @@ pub fn to_sequence_output(
     logprobs: Option<&DecodedLogprobs>,
     finished: Option<&Finished>,
     opts: &ResponseOpts,
-) -> pb::SequenceOutput {
+) -> Result<pb::SequenceOutput, Status> {
+    let finish_info = finished.map(|f| to_finish_info(f, token_ids)).transpose()?;
     let (lp_values, rank_values, candidates) = match logprobs {
         Some(lp) if opts.output_logprobs => output_logprobs_to_proto(lp),
         _ => (vec![], vec![], vec![]),
     };
 
-    pb::SequenceOutput {
+    let sampling_mask = finished
+        .and_then(|finished| finished.sampling_mask.as_ref())
+        .map(|mask| mask.rows.iter().map(|row| pb::TokenIds { ids: row.clone() }).collect())
+        .unwrap_or_default();
+
+    Ok(pb::SequenceOutput {
         index: 0, // TODO: multi-sequence (n > 1) not supported
         text: if opts.output_text {
             delta.to_string()
@@ -411,11 +414,12 @@ pub fn to_sequence_output(
         logprobs: lp_values,
         ranks: rank_values,
         candidate_tokens: candidates,
-        finish_info: finished.map(|f| to_finish_info(f, token_ids)),
-    }
+        finish_info,
+        sampling_mask,
+    })
 }
 
-fn to_finish_info(finished: &Finished, token_ids: &[u32]) -> pb::FinishInfo {
+fn to_finish_info(finished: &Finished, token_ids: &[u32]) -> Result<pb::FinishInfo, Status> {
     use pb::finish_info::FinishReason as PbFinishReason;
 
     let (finish_reason, stop_reason) = match &finished.finish_reason {
@@ -436,18 +440,18 @@ fn to_finish_info(finished: &Finished, token_ids: &[u32]) -> pb::FinishInfo {
             (PbFinishReason::Stop as i32, sr)
         }
         FinishReason::Length => (PbFinishReason::Length as i32, None),
-        FinishReason::Abort | FinishReason::Error | FinishReason::Repetition(_) => {
-            (PbFinishReason::Aborted as i32, None)
-        }
+        FinishReason::Error => return Err(Status::internal("engine failed during generation")),
+        FinishReason::Abort | FinishReason::Repetition(_) => (PbFinishReason::Aborted as i32, None),
     };
 
-    pb::FinishInfo {
+    Ok(pb::FinishInfo {
         num_output_tokens: finished.usage.output_token_count as u32,
         finish_reason,
         stop_reason,
-        kv_transfer_params: finished.kv_transfer_params.as_ref().and_then(json_to_proto_struct),
-        ec_transfer_params: finished.ec_transfer_params.as_ref().and_then(json_to_proto_struct),
-    }
+        kv_transfer_params: finished.kv_transfer_params.as_deref().and_then(json_to_proto_struct),
+        ec_transfer_params: finished.ec_transfer_params.as_deref().and_then(json_to_proto_struct),
+        num_cached_tokens: Some(finished.usage.cached_token_count as u32),
+    })
 }
 
 // ========================================================================================
@@ -603,10 +607,17 @@ impl ResponseOpts {
 #[cfg(test)]
 mod tests {
     use aphrodite_engine_core_client::protocol::output::StopReason;
-    use aphrodite_text::{FinishReason, Finished, Prompt};
+    use aphrodite_engine_core_client::protocol::sampling_mask::SamplingMask;
+    use aphrodite_text::{
+        FinishReason, Finished, Prompt, SamplingHints, SamplingLimits, lower_sampling_params,
+    };
+    use aphrodite_tokenizer::test_utils::TestTokenizer;
+    use prost::Message as _;
 
     use super::pb::finish_info::{FinishReason as PbFinishReason, StopReason as PbStopReason};
-    use super::{ResponseOpts, pb, to_finish_info, to_sequence_output, to_text_request};
+    use super::{
+        ResponseOpts, json_to_proto_struct, pb, to_finish_info, to_sequence_output, to_text_request,
+    };
 
     fn base_request() -> pb::GenerateRequest {
         pb::GenerateRequest {
@@ -614,6 +625,231 @@ mod tests {
             model: "test-model".to_string(),
             prompt: Some(pb::generate_request::Prompt::Text("hi".to_string())),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn grpc_sonar_sampler_defaults_preserve_omission_and_empty_breakers() {
+        use aphrodite_engine_core_client::protocol::sampling::AphroditeSamplingParams;
+
+        for extension in [None, Some(pb::AphroditeSamplingParams::default())] {
+            let request = pb::GenerateRequest {
+                aphrodite_sampling: extension,
+                ..base_request()
+            };
+            let converted = to_text_request(request, false, &["test-model".to_string()]).unwrap();
+            assert_eq!(
+                converted.sampling_params.aphrodite_sampling,
+                AphroditeSamplingParams::default()
+            );
+        }
+
+        let converted = super::aphrodite_sampling_from_proto(pb::AphroditeSamplingParams {
+            dry_sequence_breakers: Some(pb::aphrodite_sampling_params::SequenceBreakers {
+                values: vec![],
+            }),
+            ..Default::default()
+        });
+        assert_eq!(converted.dry_sequence_breakers, Some(vec![]));
+    }
+
+    #[test]
+    fn grpc_sonar_samplers_survive_protobuf_conversion() {
+        use aphrodite_engine_core_client::protocol::sampling::AphroditeSamplingParams;
+
+        let expected = AphroditeSamplingParams {
+            no_repeat_ngram_size: 3,
+            dynatemp_min: 0.2,
+            dynatemp_max: 1.4,
+            dynatemp_exponent: 1.5,
+            temperature_last: true,
+            top_a: 0.2,
+            tfs: 0.9,
+            eta_cutoff: 0.1,
+            epsilon_cutoff: 0.01,
+            typical_p: 0.95,
+            smoothing_factor: 0.3,
+            smoothing_curve: 1.2,
+            xtc_threshold: 0.2,
+            xtc_probability: 0.4,
+            nsigma: 2.0,
+            mirostat_mode: 2,
+            mirostat_tau: 5.0,
+            mirostat_eta: 0.1,
+            dry_multiplier: 0.8,
+            dry_base: 1.9,
+            dry_allowed_length: 3,
+            dry_sequence_breakers: Some(vec!["\n".to_string()]),
+            dry_sequence_breaker_ids: vec![10],
+            dry_range: 512,
+            dry_max_ngram: 16,
+            dry_max_occurrences: 10,
+            dry_early_exit_match_len: 9,
+            skew: 0.1,
+        };
+        let request = pb::GenerateRequest {
+            aphrodite_sampling: Some(pb::AphroditeSamplingParams {
+                no_repeat_ngram_size: Some(expected.no_repeat_ngram_size),
+                dynatemp_min: Some(expected.dynatemp_min),
+                dynatemp_max: Some(expected.dynatemp_max),
+                dynatemp_exponent: Some(expected.dynatemp_exponent),
+                temperature_last: Some(expected.temperature_last),
+                top_a: Some(expected.top_a),
+                tfs: Some(expected.tfs),
+                eta_cutoff: Some(expected.eta_cutoff),
+                epsilon_cutoff: Some(expected.epsilon_cutoff),
+                typical_p: Some(expected.typical_p),
+                smoothing_factor: Some(expected.smoothing_factor),
+                smoothing_curve: Some(expected.smoothing_curve),
+                xtc_threshold: Some(expected.xtc_threshold),
+                xtc_probability: Some(expected.xtc_probability),
+                nsigma: Some(expected.nsigma),
+                mirostat_mode: Some(expected.mirostat_mode),
+                mirostat_tau: Some(expected.mirostat_tau),
+                mirostat_eta: Some(expected.mirostat_eta),
+                dry_multiplier: Some(expected.dry_multiplier),
+                dry_base: Some(expected.dry_base),
+                dry_allowed_length: Some(expected.dry_allowed_length),
+                dry_sequence_breakers: Some(pb::aphrodite_sampling_params::SequenceBreakers {
+                    values: expected.dry_sequence_breakers.clone().unwrap(),
+                }),
+                dry_sequence_breaker_ids: expected.dry_sequence_breaker_ids.clone(),
+                dry_range: Some(expected.dry_range),
+                dry_max_ngram: Some(expected.dry_max_ngram),
+                dry_max_occurrences: Some(expected.dry_max_occurrences),
+                dry_early_exit_match_len: Some(expected.dry_early_exit_match_len),
+                skew: Some(expected.skew),
+            }),
+            ..base_request()
+        };
+        let decoded = pb::GenerateRequest::decode(request.encode_to_vec().as_slice()).unwrap();
+        let converted = to_text_request(decoded, false, &["test-model".to_string()]).unwrap();
+        assert_eq!(converted.sampling_params.aphrodite_sampling, expected);
+    }
+
+    #[test]
+    fn grpc_bad_words_token_ids_survive_protobuf_conversion_and_lowering() {
+        let request = pb::GenerateRequest {
+            decoding: Some(pb::DecodingParameters {
+                bad_words_token_ids: vec![
+                    pb::TokenIds { ids: vec![5] },
+                    pb::TokenIds { ids: vec![7, 11] },
+                ],
+                ..Default::default()
+            }),
+            ..base_request()
+        };
+        let encoded = request.encode_to_vec();
+        for stream in [false, true] {
+            let decoded = pb::GenerateRequest::decode(encoded.as_slice()).unwrap();
+            let text = to_text_request(decoded, stream, &["test-model".to_string()]).unwrap();
+            let engine = aphrodite_text::lower_text_request(
+                text,
+                vec![1],
+                SamplingHints::default(),
+                SamplingLimits {
+                    max_model_len: 256,
+                    max_logprobs: 20,
+                    model_vocab_size: 512,
+                    tokenizer_vocab_size: 512,
+                },
+                &TestTokenizer::new(),
+            )
+            .unwrap()
+            .generate_request;
+            let params = engine.sampling_params;
+            assert_eq!(params.bad_words_token_ids, Some(vec![vec![5], vec![7, 11]]));
+        }
+    }
+
+    #[test]
+    fn grpc_reasoning_controls_reach_engine_request_with_presence_intact() {
+        let chat_template_kwargs =
+            serde_json::json!({"enable_thinking": false, "reasoning_effort": "high"});
+        for (gate, budget) in [
+            (None, None),
+            (
+                Some(pb::EngineReasoningGate {
+                    reasoning_ended: Some(false),
+                    chat_template_kwargs: json_to_proto_struct(&chat_template_kwargs),
+                }),
+                Some(0),
+            ),
+            (
+                Some(pb::EngineReasoningGate {
+                    reasoning_ended: Some(true),
+                    chat_template_kwargs: None,
+                }),
+                Some(128),
+            ),
+            (Some(pb::EngineReasoningGate::default()), Some(-1)),
+        ] {
+            let expected = (
+                serde_json::json!({
+                    "chat_template_kwargs": gate
+                        .as_ref()
+                        .and_then(|gate| gate.chat_template_kwargs.as_ref())
+                        .map_or_else(|| serde_json::json!({}), |_| chat_template_kwargs.clone()),
+                }),
+                gate.as_ref().and_then(|gate| gate.reasoning_ended),
+                budget.filter(|v| *v >= 0).map(|v| v as u64),
+            );
+            let request = pb::GenerateRequest {
+                engine_reasoning_gate: gate,
+                stopping: Some(pb::StoppingCriteria {
+                    thinking_token_budget: budget,
+                    ..Default::default()
+                }),
+                ..base_request()
+            };
+            let encoded = request.encode_to_vec();
+            for stream in [false, true] {
+                let request = pb::GenerateRequest::decode(encoded.as_slice()).unwrap();
+                let text = to_text_request(request, stream, &["test-model".to_string()])
+                    .expect("reasoning controls accepted");
+                let engine = aphrodite_text::lower_text_request(
+                    text,
+                    vec![1],
+                    SamplingHints::default(),
+                    SamplingLimits {
+                        max_model_len: 256,
+                        max_logprobs: 20,
+                        model_vocab_size: 512,
+                        tokenizer_vocab_size: 512,
+                    },
+                    &TestTokenizer::new(),
+                )
+                .expect("reasoning controls lower to engine")
+                .generate_request;
+                assert_eq!(
+                    (
+                        serde_json::to_value(engine.reasoning_parser_kwargs).unwrap(),
+                        engine.reasoning_ended,
+                        engine.sampling_params.thinking_token_budget,
+                    ),
+                    expected,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn watermarking_defaults_and_opt_out_survive_protobuf_conversion() {
+        for watermarking in [None, Some(true), Some(false)] {
+            let request = pb::GenerateRequest {
+                watermarking,
+                ..base_request()
+            };
+            let encoded = request.encode_to_vec();
+            for stream in [false, true] {
+                let decoded = pb::GenerateRequest::decode(encoded.as_slice()).unwrap();
+                let text = to_text_request(decoded, stream, &["test-model".to_string()])
+                    .expect("convert request");
+                assert_eq!(
+                    text.sampling_params.watermarking,
+                    watermarking.unwrap_or(true)
+                );
+            }
         }
     }
 
@@ -628,11 +864,54 @@ mod tests {
     }
 
     #[test]
+    fn kv_hints_propagate_from_top_level_request_field() {
+        let req = pb::GenerateRequest {
+            kv_hints: Some(pb::KvHintsEnvelope {
+                protocol_version: "0.1".to_string(),
+                message_id: "msg-1".to_string(),
+                actions: vec![pb::KvHintAction {
+                    action_id: "action-1".to_string(),
+                    action_type: "example.action".to_string(),
+                    action_version: "1.0".to_string(),
+                    payload: json_to_proto_struct(&serde_json::json!({"source": "g2"})),
+                }],
+            }),
+            ..base_request()
+        };
+
+        let text = to_text_request(req, false, &["test-model".to_string()]).expect("convert ok");
+        let hints = text.kv_hints.expect("kv hints");
+        assert_eq!(hints.protocol_version, "0.1");
+        assert_eq!(hints.message_id, "msg-1");
+        assert_eq!(hints.actions[0].action_id, "action-1");
+        assert_eq!(hints.actions[0].action_type, "example.action");
+        assert_eq!(hints.actions[0].action_version, "1.0");
+        assert_eq!(
+            hints.actions[0].payload.get("source"),
+            Some(&serde_json::json!("g2"))
+        );
+    }
+
+    #[test]
     fn unset_temperature_defaults_to_greedy() {
         let text = to_text_request(base_request(), false, &["test-model".to_string()])
             .expect("convert ok");
         // The gRPC API defaults to greedy (0.0) when temperature is not specified.
         assert_eq!(text.sampling_params.temperature, Some(0.0));
+    }
+
+    #[test]
+    fn grpc_rejects_empty_grammar_before_engine() {
+        use super::pb::decoding_parameters::StructuredOutput;
+        let req = pb::GenerateRequest {
+            decoding: Some(pb::DecodingParameters {
+                structured_output: Some(StructuredOutput::Grammar("  ".to_string())),
+                ..Default::default()
+            }),
+            ..base_request()
+        };
+        let err = to_text_request(req, false, &["test-model".to_string()]).unwrap_err();
+        assert!(err.message().contains("grammar cannot be an empty string"));
     }
 
     #[test]
@@ -659,6 +938,115 @@ mod tests {
         };
         let text = to_text_request(req, false, &["test-model".to_string()]).expect("convert ok");
         assert_eq!(text.sampling_params.seed, Some(0));
+    }
+
+    #[test]
+    fn output_logprob_selectors_survive_request_lowering() {
+        use pb::candidate_tokens::Select;
+
+        let selected_ids: Vec<u32> = (100..121).collect();
+        let cases = [
+            (
+                Some(Select::TokenIds(pb::TokenIds {
+                    ids: selected_ids.clone(),
+                })),
+                None,
+                Some(selected_ids),
+            ),
+            (
+                Some(Select::TokenIds(pb::TokenIds {
+                    ids: vec![198, 198],
+                })),
+                None,
+                Some(vec![198, 198]),
+            ),
+            (
+                Some(Select::TokenIds(pb::TokenIds { ids: vec![] })),
+                Some(0),
+                None,
+            ),
+            (None, Some(0), None),
+            (Some(Select::TopN(0)), Some(0), None),
+            (Some(Select::TopN(2)), Some(2), None),
+        ];
+        for (select, expected_count, expected_ids) in cases {
+            let req = pb::GenerateRequest {
+                response: Some(pb::ResponseOptions {
+                    output_logprobs: true,
+                    output_candidates: select.map(|select| pb::CandidateTokens {
+                        select: Some(select),
+                    }),
+                    ..Default::default()
+                }),
+                ..base_request()
+            };
+            let text =
+                to_text_request(req, false, &["test-model".to_string()]).expect("convert ok");
+            let params = lower_sampling_params(
+                text.sampling_params,
+                SamplingHints::default(),
+                SamplingLimits {
+                    max_model_len: 32,
+                    max_logprobs: 20,
+                    model_vocab_size: 512,
+                    tokenizer_vocab_size: 512,
+                },
+                1,
+                &TestTokenizer::new(),
+            )
+            .expect("logprob selector should lower to an engine request");
+
+            assert_eq!(
+                (params.logprobs, params.logprob_token_ids),
+                (expected_count, expected_ids)
+            );
+        }
+    }
+
+    #[test]
+    fn grpc_sampling_preserves_explicit_values_and_model_defaults_through_lowering() {
+        for ((top_k, top_p, min_p), expected) in [
+            ((None, None, None), (8, 0.9, 0.2)),
+            ((Some(0), Some(1.0), Some(0.0)), (0, 1.0, 0.0)),
+            ((Some(50), Some(0.8), Some(0.1)), (50, 0.8, 0.1)),
+        ] {
+            let request = pb::GenerateRequest {
+                temperature: Some(0.7),
+                sampling: Some(pb::RandomSampling {
+                    top_k,
+                    top_p,
+                    min_p,
+                    ..Default::default()
+                }),
+                ..base_request()
+            };
+            let encoded = request.encode_to_vec();
+            for stream in [false, true] {
+                let decoded = pb::GenerateRequest::decode(encoded.as_slice()).unwrap();
+                let text = to_text_request(decoded, stream, &["test-model".to_string()]).unwrap();
+                let engine = aphrodite_text::lower_text_request(
+                    text,
+                    vec![1],
+                    SamplingHints {
+                        default_top_k: Some(8),
+                        default_top_p: Some(0.9),
+                        default_min_p: Some(0.2),
+                        ..Default::default()
+                    },
+                    SamplingLimits {
+                        max_model_len: 256,
+                        max_logprobs: 20,
+                        model_vocab_size: 512,
+                        tokenizer_vocab_size: 512,
+                    },
+                    &TestTokenizer::new(),
+                )
+                .unwrap()
+                .generate_request;
+                let params = engine.sampling_params;
+                assert_eq!((params.top_k, params.top_p, params.min_p), expected);
+            }
+        }
     }
 
     #[test]
@@ -699,6 +1087,8 @@ mod tests {
             finish_reason: reason,
             kv_transfer_params: None,
             ec_transfer_params: None,
+            sampling_mask: None,
+            timestamps: Default::default(),
         }
     }
 
@@ -707,7 +1097,7 @@ mod tests {
         let fin = finished(FinishReason::Stop(None));
         let token_ids = [1_u32, 2, 3, 151643];
 
-        let info = to_finish_info(&fin, &token_ids);
+        let info = to_finish_info(&fin, &token_ids).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Stop as i32);
         assert_eq!(info.stop_reason, Some(PbStopReason::EosTokenId(151643)));
@@ -717,7 +1107,7 @@ mod tests {
     fn eos_stop_with_empty_token_ids_leaves_stop_reason_unset() {
         let fin = finished(FinishReason::Stop(None));
 
-        let info = to_finish_info(&fin, &[]);
+        let info = to_finish_info(&fin, &[]).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Stop as i32);
         assert_eq!(info.stop_reason, None);
@@ -728,7 +1118,7 @@ mod tests {
         let fin = finished(FinishReason::Stop(Some(StopReason::TokenId(42))));
         // Terminal token list should be ignored when an explicit stop reason is
         // present.
-        let info = to_finish_info(&fin, &[7, 42]);
+        let info = to_finish_info(&fin, &[7, 42]).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Stop as i32);
         assert_eq!(info.stop_reason, Some(PbStopReason::StopTokenId(42)));
@@ -738,7 +1128,7 @@ mod tests {
     fn explicit_stop_string_is_preserved() {
         let fin = finished(FinishReason::Stop(Some(StopReason::Text("</stop>".into()))));
 
-        let info = to_finish_info(&fin, &[1, 2, 3]);
+        let info = to_finish_info(&fin, &[1, 2, 3]).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Stop as i32);
         assert_eq!(
@@ -751,7 +1141,7 @@ mod tests {
     fn length_finish_has_no_stop_reason() {
         let fin = finished(FinishReason::Length);
 
-        let info = to_finish_info(&fin, &[1, 2, 3]);
+        let info = to_finish_info(&fin, &[1, 2, 3]).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Length as i32);
         assert_eq!(info.stop_reason, None);
@@ -761,7 +1151,7 @@ mod tests {
     fn abort_finish_is_mapped_to_aborted() {
         let fin = finished(FinishReason::Abort);
 
-        let info = to_finish_info(&fin, &[]);
+        let info = to_finish_info(&fin, &[]).expect("finish info");
 
         assert_eq!(info.finish_reason, PbFinishReason::Aborted as i32);
         assert_eq!(info.stop_reason, None);
@@ -769,17 +1159,58 @@ mod tests {
 
     #[test]
     fn to_sequence_output_threads_token_ids_into_eos_id() {
-        let fin = finished(FinishReason::Stop(None));
+        let mut fin = finished(FinishReason::Stop(None));
+        fin.usage.prompt_token_count = 8;
+        fin.usage.cached_token_count = 5;
         let opts = ResponseOpts {
             output_text: true,
             output_token_ids: true,
             ..Default::default()
         };
 
-        let out = to_sequence_output("hello", &[10, 20, 30], None, Some(&fin), &opts);
+        let out = to_sequence_output("hello", &[10, 20, 30], None, Some(&fin), &opts)
+            .expect("sequence output");
+        let out = pb::SequenceOutput::decode(out.encode_to_vec().as_slice()).unwrap();
 
         let finish = out.finish_info.expect("finish_info should be present");
         assert_eq!(finish.finish_reason, PbFinishReason::Stop as i32);
         assert_eq!(finish.stop_reason, Some(PbStopReason::EosTokenId(30)));
+        assert_eq!(finish.num_cached_tokens, Some(5));
+    }
+
+    #[test]
+    fn sequence_output_only_carries_sampling_mask_on_terminal_output() {
+        let mut fin = finished(FinishReason::Length);
+        fin.sampling_mask = Some(SamplingMask {
+            rows: vec![vec![1, 10], vec![2, 20]],
+        });
+
+        let terminal =
+            to_sequence_output("", &[10, 20], None, Some(&fin), &ResponseOpts::default())
+                .expect("terminal output");
+        let intermediate = to_sequence_output("", &[9], None, None, &ResponseOpts::default())
+            .expect("intermediate output");
+
+        assert_eq!(
+            terminal.sampling_mask,
+            vec![
+                pb::TokenIds { ids: vec![1, 10] },
+                pb::TokenIds { ids: vec![2, 20] }
+            ]
+        );
+        assert!(intermediate.sampling_mask.is_empty());
+    }
+
+    #[test]
+    fn sampling_mask_uses_additive_proto_tag_ten() {
+        let response = pb::SequenceOutput {
+            sampling_mask: vec![pb::TokenIds { ids: vec![7, 8] }],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            response.encode_to_vec(),
+            vec![0x52, 0x04, 0x0a, 0x02, 0x07, 0x08]
+        );
     }
 }
