@@ -120,6 +120,17 @@ export GLOO_SOCKET_IFNAME=eth0
 Replace `eth0` with the data-plane interface. Do not select a management
 interface with lower bandwidth.
 
+Set `APHRODITE_HOST_IP` to this node's address on the data-plane network:
+
+```bash
+export APHRODITE_HOST_IP=10.0.0.11
+```
+
+Use a different, reachable address on each node. `--master-addr` selects the
+head node; it does not set the address that each worker advertises.
+Set this variable when the default interface uses an address that other
+nodes cannot reach, such as a private container bridge.
+
 Set `NCCL_IB_DISABLE=1` only when the nodes do not have a working InfiniBand or
 RoCE path:
 

@@ -35,30 +35,31 @@ def get_fake_args_from_graph(graph: fx.GraphModule) -> list[Any]:
 
 
 def create_concrete_args(graph: fx.GraphModule, size: int) -> list[Any]:
-    """Create Fake example inputs with symbolic dims replaced by a concrete size.
+    """Specialize token count while preserving independent layout symbols.
 
-    Used for single-size compilation where we need concrete-shaped inputs.
-    The Dynamo-captured graph gives us example inputs with SymInts in them.
+    The first symbolic scalar is the runtime range-dispatch key. Other symbols
+    can describe non-contiguous strides or storage offsets.
     """
     from torch._prims_common import compute_required_storage_length
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_symbolic
 
+    fake_args = get_fake_args_from_graph(graph)
+    size_expr = next((arg.node.expr for arg in fake_args if isinstance(arg, torch.SymInt)), None)
+
     def concretize(sym_val: Any) -> int:
-        """Replace all symbolic variables in a SymInt expression with size."""
         if not is_symbolic(sym_val):
             return int(sym_val)
         expr = sym_val.node.expr
-        return int(expr.subs({s: size for s in expr.free_symbols}))
+        if size_expr is not None:
+            expr = expr.subs(size_expr, size)
+        return int(sym_val.node.shape_env.guarding_hint_or_throw(expr))
 
     fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
     args: list[Any] = []
     with fake_mode:
-        for node in graph.graph.nodes:
-            if node.op != "placeholder":
-                break
-            val = node.meta["example_value"]
+        for val in fake_args:
             if isinstance(val, torch.SymInt):
                 args.append(concretize(val))
             elif isinstance(val, torch.Tensor):

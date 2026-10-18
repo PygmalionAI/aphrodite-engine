@@ -2369,7 +2369,13 @@ def cleanup_dist_env_and_memory(shutdown_ray: bool = False):
     gc.collect()
     from aphrodite.platforms import current_platform
 
-    if not current_platform.is_cpu():
+    if current_platform.is_metal():
+        import mlx.core as mx
+
+        mx.clear_cache()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    elif not current_platform.is_cpu():
         from aphrodite.triton_utils import HAS_TRITON
 
         if HAS_TRITON:

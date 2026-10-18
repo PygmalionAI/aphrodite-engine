@@ -229,6 +229,14 @@ class MetalPlatform(Platform):
         model_config = aphrodite_config.model_config
         compilation_config = aphrodite_config.compilation_config
 
+        if model_config is not None and model_config.is_hybrid and aphrodite_config.cache_config.enable_prefix_caching:
+            aphrodite_config.cache_config.enable_prefix_caching = False
+            aphrodite_config.cache_config.mamba_cache_mode = "none"
+            aphrodite_config.cache_config.mamba_block_size = None
+            logger.warning(
+                "Metal hybrid models do not support prefix caching of recurrent state; disabling prefix caching."
+            )
+
         # Metal execution is MLX-backed. Torch Inductor/CUDAGraph settings do
         # not apply to the actual model path, so disable those compilation
         # surfaces without overriding the user's eager-mode flag here.

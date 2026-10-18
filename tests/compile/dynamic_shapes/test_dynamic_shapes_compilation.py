@@ -7,9 +7,14 @@ from dataclasses import dataclass
 
 import pytest
 import torch
+import torch.fx as fx
+from torch._dynamo.source import LocalSource
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
 from aphrodite import SamplingParams
 from aphrodite.compilation.decorators import support_torch_compile
+from aphrodite.compilation.piecewise_backend import create_concrete_args
 from aphrodite.config import AphroditeConfig, CompilationConfig, set_current_aphrodite_config
 from aphrodite.config.compilation import (
     CompilationMode,
@@ -28,6 +33,35 @@ def get_test_models():
         "openai-community/gpt2",
     ]
     return models
+
+
+@pytest.mark.parametrize("token_stride", [False, True])
+def test_static_compile_preserves_symbolic_layout(token_stride: bool):
+    shape_env = ShapeEnv()
+
+    def backed(name: str, hint: int):
+        source = LocalSource(name)
+        symbol = shape_env.create_symbol(hint, source, dynamic_dim=DimDynamic.DYNAMIC)
+        return shape_env.create_symintnode(symbol, hint=hint, source=source)
+
+    num_tokens = backed("tokens", 10)
+    row_stride = num_tokens if token_stride else backed("row_stride", 513)
+    storage_offset = backed("storage_offset", 7)
+    with FakeTensorMode(shape_env=shape_env):
+        storage = torch.empty(3 * row_stride + storage_offset)
+        positions = storage.as_strided((3, num_tokens), (row_stride, 1), storage_offset)
+
+    graph = fx.Graph()
+    for name, example in [("num_tokens", num_tokens), ("positions", positions)]:
+        node = graph.placeholder(name)
+        node.meta["example_value"] = example
+    graph.output(())
+
+    concrete = create_concrete_args(fx.GraphModule(torch.nn.Module(), graph), 8)
+    assert concrete[0] == 8
+    assert tuple(concrete[1].shape) == (3, 8)
+    assert concrete[1].stride() == (8 if token_stride else 513, 1)
+    assert concrete[1].storage_offset() == 7
 
 
 @dataclass(frozen=True)

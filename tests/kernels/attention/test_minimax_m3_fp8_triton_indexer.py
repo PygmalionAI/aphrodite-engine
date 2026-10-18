@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""fp8 query and index-K cache on the Triton indexer must agree with bf16.
+"""fp8 query and index-K cache must match a dequantized FP32 ranking reference.
 
 The MiniMax M3 lightning-indexer scores only feed a top-k block ranking (the
 attention itself reads the main KV cache), so an fp8 (e4m3) side cache trades
@@ -42,16 +42,22 @@ def _make_inputs(device: str) -> tuple[torch.Tensor, torch.Tensor]:
     return q, keys
 
 
-def _check_selection(top_bf16: set[int], top_fp8: set[int]) -> None:
-    # Planted (clearly relevant) blocks must never be lost.
-    assert all(b in top_fp8 for b in PLANTED)
-    # Selection may differ only at the noise floor (near-tied filler blocks).
-    assert len(top_bf16 & top_fp8) >= TOPK - 2
+def _check_selection(selected: set[int], query: torch.Tensor, keys: torch.Tensor) -> None:
+    assert len(selected) == TOPK
+    assert all(b in selected for b in PLANTED)
+    token_scores = (keys[:SEQ_LEN].float() * query[0, 0].float()).sum(dim=-1)
+    padding = (-SEQ_LEN) % PAGE
+    token_scores = torch.nn.functional.pad(token_scores, (0, padding), value=-torch.inf)
+    block_scores = token_scores.reshape(-1, PAGE).amax(dim=-1)
+    assert all(0 <= b < block_scores.numel() for b in selected)
+    expected = block_scores.topk(TOPK).values
+    actual = block_scores[sorted(selected)].sort(descending=True).values
+    torch.testing.assert_close(actual, expected, rtol=1e-6, atol=1e-4)
 
 
 @pytest.mark.skipif(not FP8_CUDA_SUPPORTED, reason="CUDA FP8 support required")
 @torch.inference_mode()
-def test_fp8_index_query_and_cache_decode_topk_matches_bf16() -> None:
+def test_fp8_index_query_and_cache_decode_topk_matches_reference() -> None:
     dev = "cuda"
     q, keys = _make_inputs(dev)
     block_table = torch.arange(NUM_PAGES, dtype=torch.int32, device=dev).unsqueeze(0)
@@ -74,12 +80,13 @@ def test_fp8_index_query_and_cache_decode_topk_matches_bf16() -> None:
         )
         return {int(b) for b in idx[0, 0].tolist() if b >= 0}
 
-    _check_selection(select(keys), select(keys.to(torch.float8_e4m3fn)))
+    for cache in (keys, keys.to(torch.float8_e4m3fn)):
+        _check_selection(select(cache), q.to(cache.dtype), cache)
 
 
 @pytest.mark.skipif(not FP8_CUDA_SUPPORTED, reason="CUDA FP8 support required")
 @torch.inference_mode()
-def test_fp8_index_query_and_cache_prefill_topk_matches_bf16() -> None:
+def test_fp8_index_query_and_cache_prefill_topk_matches_reference() -> None:
     dev = "cuda"
     q, keys = _make_inputs(dev)
     block_table = torch.arange(NUM_PAGES, dtype=torch.int32, device=dev).unsqueeze(0)
@@ -104,12 +111,13 @@ def test_fp8_index_query_and_cache_prefill_topk_matches_bf16() -> None:
         idx = minimax_m3_index_topk(score, cu_seqlens_q, prefix_lens, 1, TOPK, 0, 0)
         return {int(b) for b in idx[0, 0].tolist() if b >= 0}
 
-    _check_selection(select(keys), select(keys.to(torch.float8_e4m3fn)))
+    for cache in (keys, keys.to(torch.float8_e4m3fn)):
+        _check_selection(select(cache), q.to(cache.dtype), cache)
 
 
 @pytest.mark.skipif(not FP8_CUDA_SUPPORTED, reason="CUDA FP8 support required")
 @torch.inference_mode()
-def test_bf16_query_against_fp8_cache_decode_topk_matches_bf16() -> None:
+def test_bf16_query_against_fp8_cache_decode_topk_matches_reference() -> None:
     """A mixed pair must upcast rather than emit a mixed-dtype fp8 dot.
 
     Production allocates index_q with the index-K cache dtype, so the scorers
@@ -138,4 +146,5 @@ def test_bf16_query_against_fp8_cache_decode_topk_matches_bf16() -> None:
         )
         return {int(b) for b in idx[0, 0].tolist() if b >= 0}
 
-    _check_selection(select(keys), select(keys.to(torch.float8_e4m3fn)))
+    for cache in (keys, keys.to(torch.float8_e4m3fn)):
+        _check_selection(select(cache), q, cache)

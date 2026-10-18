@@ -2,6 +2,8 @@
 
 Metal paged-attention shaders vendored from [mistral.rs](https://github.com/EricLBuehler/mistral.rs) (MIT license).
 
+`uv pip install -e .` builds the native `_paged_ops` extension for the active Python interpreter. Rebuild it if you change Python versions. The loader initializes MLX before importing the extension, so editable builds do not need `DYLD_LIBRARY_PATH`. If no packaged extension is available, `build.py` compiles one into the local cache.
+
 ## `kernels_v1/` — active
 
 Compiled and dispatched by `paged_ops.cpp` via MLX's native Metal command encoder.

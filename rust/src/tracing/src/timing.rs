@@ -180,6 +180,9 @@ mod tests {
 
     const TARGET: &str = "test_request_timing";
 
+    // Scoped subscribers still share tracing's process-global callsite cache.
+    static LOG_LEVEL_TESTS: Mutex<()> = Mutex::new(());
+
     fn stage_span(stage: &'static str) -> tracing::Span {
         info_span!(target: TARGET, "stage", stage)
     }
@@ -229,6 +232,7 @@ mod tests {
 
     #[test]
     fn does_not_enable_debug_at_info() {
+        let _guard = LOG_LEVEL_TESTS.lock().unwrap();
         let (timing_layer, _) = RequestTimingLayer::new(TARGET);
         let info_layer = tracing_subscriber::fmt::layer()
             .with_writer(std::io::sink)
@@ -237,7 +241,6 @@ mod tests {
         let evaluated_debug_fields = AtomicUsize::new(0);
 
         tracing::subscriber::with_default(subscriber, || {
-            assert_eq!(LevelFilter::current(), LevelFilter::INFO);
             debug!(
                 value = evaluated_debug_fields.fetch_add(1, Ordering::Relaxed),
                 "debug event"
@@ -250,6 +253,7 @@ mod tests {
 
     #[test]
     fn does_not_disable_explicit_debug_logging() {
+        let _guard = LOG_LEVEL_TESTS.lock().unwrap();
         let (timing_layer, _) = RequestTimingLayer::new(TARGET);
         let debug_layer = tracing_subscriber::fmt::layer()
             .with_writer(std::io::sink)
@@ -258,7 +262,6 @@ mod tests {
         let evaluated_debug_fields = AtomicUsize::new(0);
 
         tracing::subscriber::with_default(subscriber, || {
-            assert_eq!(LevelFilter::current(), LevelFilter::DEBUG);
             debug!(
                 value = evaluated_debug_fields.fetch_add(1, Ordering::Relaxed),
                 "debug event"

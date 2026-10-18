@@ -189,6 +189,10 @@ uv pip install -r requirements/metal.txt
 APHRODITE_TARGET_DEVICE=metal uv pip install . --no-build-isolation
 ```
 
+Metal supports hybrid attention models, but it cannot reuse their recurrent
+state across requests. Sonar disables prefix caching for these models and logs
+a warning. Prefix caching remains available for pure-attention models.
+
 ## Google TPU
 
 TPU support requires a TPU VM and a compatible PyTorch XLA installation.
