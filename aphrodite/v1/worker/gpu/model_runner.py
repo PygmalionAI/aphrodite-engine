@@ -57,6 +57,7 @@ from aphrodite.model_executor.offloader import (
     get_offloader,
     set_offloader,
 )
+from aphrodite.model_executor.warmup.b12x_warmup import warmup_b12x_model
 from aphrodite.model_executor.warmup.jit_warmup import JitWarmupRegistry
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.encoder_budget import (
@@ -105,6 +106,7 @@ from aphrodite.v1.worker.gpu.buffer_utils import set_default_max_concurrency
 from aphrodite.v1.worker.gpu.cp_utils import prepare_dcp_local_seq_lens
 from aphrodite.v1.worker.gpu.cudagraph_utils import (
     BatchExecutionDescriptor,
+    CudaGraphManager,
     ModelCudaGraphManager,
     has_compiled_submodule,
     make_cudagraph_stats,
@@ -992,6 +994,22 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 "to enable decoder capture, ensure `cudagraph_mode` is not `NONE`."
             )
             return 0
+
+        if capture_decoder:
+            warmup_b12x_model(
+                self.model,
+                tuple(self.cudagraph_manager.planned_token_counts()),
+                self.dtype,
+            )
+            draft_model = self.get_draft_model()
+            if draft_model is not None:
+                draft_counts = {
+                    count
+                    for manager in vars(self.speculator).values()
+                    if isinstance(manager, CudaGraphManager)
+                    for count in manager.planned_token_counts()
+                }
+                warmup_b12x_model(draft_model, tuple(sorted(draft_counts)), self.dtype)
 
         compilation_counter.num_gpu_runner_capture_triggers += 1
 

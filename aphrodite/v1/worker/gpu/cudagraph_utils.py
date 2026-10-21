@@ -469,6 +469,21 @@ class CudaGraphManager:
 
         self._graphs_captured = True
 
+    def planned_token_counts(self) -> list[int]:
+        """Token counts used by whole-batch graphs and their token-split microbatches."""
+        return sorted(
+            {
+                count
+                for descs in self._capture_descs.values()
+                for desc in descs
+                for count in (
+                    desc.num_tokens,
+                    desc.num_tokens // desc.num_ubatches,
+                    desc.num_tokens - (desc.num_tokens // desc.num_ubatches) * (desc.num_ubatches - 1),
+                )
+            }
+        )
+
     def captured_token_counts(self) -> list[int]:
         """Sorted token counts with a captured graph, ignoring LoRA variants."""
         return sorted({desc.num_tokens for desc in self.graphs if desc.num_active_loras == 0})

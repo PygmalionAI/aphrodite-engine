@@ -191,6 +191,29 @@ checkpoint on the target GPU.
 Compare output quality with the unquantized checkpoint. Weight-only formats can
 affect model quality even when the serving interface is unchanged.
 
+### FP4 MoE on SM120 GPUs
+
+On SM120 GPUs, use `--moe-backend b12x` for supported FP4 MoE checkpoints.
+Install the optional dependency in the same environment as Sonar:
+
+```bash
+uv pip install 'b12x==1.5.1'
+```
+
+B12x supports tensor parallelism, not expert parallelism. Do not combine it with
+`--enable-expert-parallel`.
+
+MXFP4 uses MXFP8 activations by default. Set
+`APHRODITE_B12X_MOE_FP4_FORCE_A16=1` to use 16-bit activations instead.
+This changes activation precision. Compare output quality and performance on
+your workload before you use it in production.
+
+For DeepSeek-V4.1 on SM120, Sonar uses native FP8 sparse indexers from the bundled
+DeepGEMM, including 128-row KV-cache pages. If an external DeepGEMM package lacks
+the required APIs or SM120 headers, Sonar uses the Triton indexer instead.
+`APHRODITE_USE_DEEP_GEMM=0` forces that fallback; it does not select the MoE backend.
+General DeepGEMM GEMMs remain disabled on SM120.
+
 ## Choose parallelism
 
 Tensor parallelism splits model layers across GPUs and reduces weight memory on
