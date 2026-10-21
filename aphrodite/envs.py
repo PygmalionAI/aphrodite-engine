@@ -196,6 +196,7 @@ if TYPE_CHECKING:
     APHRODITE_HUMMING_USE_F16_ACCUM: bool = False
     APHRODITE_HUMMING_MOE_GEMM_TYPE: Literal["indexed", "grouped", "auto"] | None = None
     APHRODITE_B12X_MOE_FP4_FORCE_A16: bool = False
+    APHRODITE_DSV41_SM120_NATIVE: bool = False
     APHRODITE_DEEPEPLL_NVFP4_DISPATCH: bool = False
     APHRODITE_V1_USE_OUTLINES_CACHE: bool = False
     APHRODITE_TPU_USING_PATHWAYS: bool = False
@@ -1496,6 +1497,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     # Force b12x FP4 MoE to use BF16 activations.
     "APHRODITE_B12X_MOE_FP4_FORCE_A16": lambda: bool(int(os.getenv("APHRODITE_B12X_MOE_FP4_FORCE_A16", "0"))),
+    "APHRODITE_DSV41_SM120_NATIVE": lambda: bool(int(os.getenv("APHRODITE_DSV41_SM120_NATIVE", "0"))),
     # Allow use of FlashInfer MxInt4 MoE kernels for fused moe ops.
     "APHRODITE_USE_FLASHINFER_MOE_INT4": lambda: bool(int(os.getenv("APHRODITE_USE_FLASHINFER_MOE_INT4", "0"))),
     # Control the cache sized used by the xgrammar compiler. The default

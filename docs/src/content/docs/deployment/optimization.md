@@ -194,10 +194,13 @@ affect model quality even when the serving interface is unchanged.
 ### FP4 MoE on SM120 GPUs
 
 On SM120 GPUs, use `--moe-backend b12x` for supported FP4 MoE checkpoints.
-Install the optional dependency in the same environment as Sonar:
+B12x is included in `flashinfer-python`. Do not install the archived standalone
+`b12x` package. If it is already installed, remove it and restore the bundled
+provider in the same environment as Sonar:
 
 ```bash
-uv pip install 'b12x==1.5.1'
+uv pip uninstall b12x
+uv pip install --reinstall --no-deps 'flashinfer-python==0.7.2'
 ```
 
 B12x supports tensor parallelism, not expert parallelism. Do not combine it with
@@ -208,11 +211,28 @@ MXFP4 uses MXFP8 activations by default. Set
 This changes activation precision. Compare output quality and performance on
 your workload before you use it in production.
 
-For DeepSeek-V4.1 on SM120, Sonar uses native FP8 sparse indexers from the bundled
+By default, for DeepSeek-V4.1 on SM120, Sonar uses native FP8 sparse indexers from the bundled
 DeepGEMM, including 128-row KV-cache pages. If an external DeepGEMM package lacks
 the required APIs or SM120 headers, Sonar uses the Triton indexer instead.
 `APHRODITE_USE_DEEP_GEMM=0` forces that fallback; it does not select the MoE backend.
 General DeepGEMM GEMMs remain disabled on SM120.
+
+### Native DeepSeek-V4.1 backend on SM120
+
+Set `APHRODITE_DSV41_SM120_NATIVE=1` and pass
+`--attention-backend B12X_DSV41` when you launch DeepSeek-V4.1 to select the
+experimental native B12x backend. With DSpark, also set
+`"attention_backend": "B12X_DSV41"` in `--speculative-config`.
+
+This path uses packed compressed KV caches, native sparse attention, fused
+output projections, and native Engram lookup. It retains Sonar's MoE scheduling.
+
+Use the bundled B12x provider described above. The archived standalone package
+is not supported.
+
+Do not combine this path with pipeline parallelism, context parallelism, dual
+batch overlap, or LoRA. The existing backend remains the default. Remove the
+environment variable and the B12x attention-backend overrides to return to it.
 
 ## Choose parallelism
 
