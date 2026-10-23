@@ -19,8 +19,8 @@ instead of embedding feature-specific logic directly.
 import functools
 import gc
 import time
-from collections.abc import Iterable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any, NamedTuple
@@ -39,7 +39,7 @@ from aphrodite.distributed.aux_output_connector.worker import (
     AuxOutputWorkerConnector,
     get_aux_output_connector,
 )
-from aphrodite.distributed.parallel_state import get_dcp_group, get_pp_group
+from aphrodite.distributed.parallel_state import get_dcp_group, get_pp_group, get_tp_group
 from aphrodite.forward_context import BatchDescriptor, set_forward_context
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe.all2all_utils import get_ep_all2all_manager
@@ -57,6 +57,7 @@ from aphrodite.model_executor.offloader import (
     get_offloader,
     set_offloader,
 )
+from aphrodite.model_executor.warmup.b12x_warmup import warmup_b12x_model
 from aphrodite.model_executor.warmup.jit_warmup import JitWarmupRegistry
 from aphrodite.multimodal import MULTIMODAL_REGISTRY
 from aphrodite.multimodal.encoder_budget import (
@@ -105,6 +106,7 @@ from aphrodite.v1.worker.gpu.buffer_utils import set_default_max_concurrency
 from aphrodite.v1.worker.gpu.cp_utils import prepare_dcp_local_seq_lens
 from aphrodite.v1.worker.gpu.cudagraph_utils import (
     BatchExecutionDescriptor,
+    CudaGraphManager,
     ModelCudaGraphManager,
     has_compiled_submodule,
     make_cudagraph_stats,
@@ -189,7 +191,11 @@ from aphrodite.v1.worker.utils import (
     copy_kv_cache_blocks_inplace,
     get_uniform_decode_token_count,
 )
-from aphrodite.v1.worker.workspace import lock_workspace, use_workspace_lane
+from aphrodite.v1.worker.workspace import (
+    current_workspace_manager,
+    lock_workspace,
+    use_workspace_lane,
+)
 
 logger = init_logger(__name__)
 
@@ -210,6 +216,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.jit_warmup_registry = JitWarmupRegistry(aphrodite_config)
 
         self.device = device
+        self._pcie_pull_comm = getattr(get_tp_group().device_communicator, "pcie_pull_ar_comm", None)
         self.dtype = self.model_config.dtype
         self.kv_cache_dtype = self.dtype
         if self.cache_config.cache_dtype != "auto":
@@ -782,6 +789,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         is_profile: bool = False,
         valid_dummy_state_slots: bool = False,
         randomize_inputs: bool = False,
+        single_request_prefill: bool = False,
+        profile_all_kv_cache_groups: bool = False,
         **kwargs,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         if skip_attn and not is_profile:
@@ -807,6 +816,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 num_tokens,
                 self.max_num_tokens - num_reqs * self.speculator.num_extra_query_per_req,
             )
+        if single_request_prefill:
+            num_reqs = 1
 
         assert num_tokens <= self.max_num_tokens, (
             f"Dummy run with {num_tokens} tokens exceeds max_num_batched_tokens ({self.max_num_tokens})"
@@ -851,6 +862,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 is_profile=is_profile,
                 context_len=context_len,
                 valid_dummy_state_slots=valid_dummy_state_slots,
+                profile_all_kv_cache_groups=profile_all_kv_cache_groups,
                 randomize_inputs=randomize_inputs,
             )
         self.kv_connector.set_disabled(False)
@@ -925,7 +937,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.pooling_runner.dummy_pooler_run(hidden_states)
 
     @torch.inference_mode()
-    def profile_run(self, randomize_inputs: bool = False) -> None:
+    def profile_run(
+        self,
+        randomize_inputs: bool = False,
+        prepare_profile_state: Callable[[], None] | None = None,
+    ) -> None:
         if self.supports_mm_inputs and self.is_first_pp_rank:
             mm_config = self.model_config.multimodal_config
             if mm_config is not None and not mm_config.skip_mm_profiling:
@@ -950,8 +966,32 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         torch.accelerator.synchronize()
         del hidden_states, sample_hidden_states
+        if prepare_profile_state is not None:
+            self._profile_native_attention(prepare_profile_state, randomize_inputs)
+            current_workspace_manager().reserve_by_lane()
         self.reset_encoder_cache()
         gc.collect()
+
+    def _profile_native_attention(self, prepare_profile_state: Callable[[], None], randomize_inputs: bool) -> None:
+        from aphrodite.v1.worker.gpu.cudagraph_utils import (
+            _init_minimal_kv_cache_for_profiling,
+            _teardown_profiling_state,
+        )
+
+        try:
+            _init_minimal_kv_cache_for_profiling(self, num_blocks=1)
+            prepare_profile_state()
+            self._dummy_run(
+                self.max_num_tokens,
+                skip_eplb=True,
+                is_profile=True,
+                single_request_prefill=True,
+                profile_all_kv_cache_groups=True,
+                randomize_inputs=randomize_inputs,
+            )
+            torch.accelerator.synchronize()
+        finally:
+            _teardown_profiling_state(self)
 
     def reset_mm_cache(self) -> None:
         if self.encoder_cache is not None:
@@ -968,11 +1008,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             self.pooling_runner.release_late_interaction_query_cache(query_keys)
 
     @torch.inference_mode()
-    def profile_cudagraph_memory(self) -> int:
+    def profile_cudagraph_memory(self, prepare_profile_state: Callable[[], None] | None = None) -> int:
         """Estimate the GPU memory required to capture CUDA graphs."""
         # Runs before the KV cache exists, outside compile_or_warm_up_model.
         with self.eplb.suppress():
-            return _profile_cudagraph_memory(self)
+            return _profile_cudagraph_memory(self, prepare_profile_state)
 
     def needs_cudagraph_capture(self) -> bool:
         """Whether capture_model() has any CUDA graphs left to capture."""
@@ -981,7 +1021,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         )
 
     @torch.inference_mode()
-    def capture_model(self, *, profile_only: bool = False) -> int:
+    def capture_model(self, *, profile_only: bool = False, preparation_session: Any | None = None) -> int:
         assert self.cudagraph_manager is not None
         capture_encoder = self.model_state.supports_mm_inputs and self.model_state.encoder_runner.has_cudagraph()
         capture_decoder = self.cudagraph_manager.needs_capture()
@@ -993,10 +1033,34 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             )
             return 0
 
+        if capture_decoder:
+            warmup_b12x_model(
+                self.model,
+                tuple(self.cudagraph_manager.planned_token_counts()),
+                self.dtype,
+            )
+            draft_model = self.get_draft_model()
+            if draft_model is not None:
+                draft_counts = {
+                    count
+                    for manager in vars(self.speculator).values()
+                    if isinstance(manager, CudaGraphManager)
+                    for count in manager.planned_token_counts()
+                }
+                warmup_b12x_model(draft_model, tuple(sorted(draft_counts)), self.dtype)
+        if getattr(self.model, "supports_b12x_native_preparation", False):
+            self.cudagraph_manager.synchronize_warmup = True
+            if self.speculator is not None:
+                for manager in vars(self.speculator).values():
+                    if isinstance(manager, CudaGraphManager):
+                        manager.synchronize_warmup = True
+
         compilation_counter.num_gpu_runner_capture_triggers += 1
 
         start_time = time.perf_counter()
-        with freeze_gc_for_cudagraph_capture():
+        # Sonar's legacy MoE providers above compile before the native guard.
+        guard = preparation_session.capture() if preparation_session is not None else nullcontext()
+        with guard, freeze_gc_for_cudagraph_capture():
             torch.accelerator.empty_cache()
             start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
 
@@ -1117,6 +1181,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             # Streaming input update: request already exists from a prior
             # chunk. Remove old state so it can be cleanly re-added below
             # with the updated prompt_token_ids and mm_features.
+            if req_id in self.req_states.req_id_to_index:
+                prepare_update = getattr(self.model_state, "prepare_streaming_update", None)
+                if prepare_update is not None:
+                    prepare_update(req_id)
             self._remove_request(req_id)
 
             prompt_len = new_req_data.prompt_len
@@ -1610,6 +1678,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         is_profile: bool = False,
         context_len: int = 0,
         valid_dummy_state_slots: bool = False,
+        profile_all_kv_cache_groups: bool = False,
         randomize_inputs: bool = False,
     ) -> ModelRunnerOutput | IntermediateTensors | None:
         if not dummy_run:
@@ -1655,6 +1724,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             # Encoder-decoder models such as Whisper should run eager/non-compiled
             # when encoder inputs are scheduled, because this step updates
             # cross-attention cache with dynamic encoder outputs.
+            skip_compiled = True
+        max_cudagraph_query_len = getattr(self.model_state, "max_cudagraph_query_len", None)
+        if (
+            max_cudagraph_query_len is not None
+            and max(scheduler_output.num_scheduled_tokens.values()) > max_cudagraph_query_len
+        ):
             skip_compiled = True
 
         batch_desc, dp_sync_state = dispatch_cg_and_sync_dp(
@@ -1771,7 +1846,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             slot_mappings_by_layer = build_slot_mappings_by_layer(slot_mappings, self.kv_cache_config)
             assert block_tables is not None
             attn_groups = self.attn_groups
-            if dummy_run and is_profile and not valid_dummy_state_slots:
+            if dummy_run and is_profile and not valid_dummy_state_slots and not profile_all_kv_cache_groups:
                 # Mamba layers take a cheap warmup path with no metadata;
                 # attention metadata is still built so those kernels tune.
                 # valid_dummy_state_slots runs the real Mamba kernels on distinct
@@ -2027,6 +2102,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if self.aux_output_connector is not None:
             pending_aux_output = self.aux_output_connector.prepare_output(input_batch)
 
+        tp_fault_status = None
+        if self._pcie_pull_comm is not None and self._pcie_pull_comm.initialized:
+            tp_fault_status = self._pcie_pull_comm.close_step()
         # Start async output copy here so that it can overlap with speculator proposal.
         async_output = AsyncOutput(
             model_runner_output=model_runner_output,
@@ -2036,6 +2114,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             copy_stream=self.output_copy_stream,
             check_ep_fault=self.check_ep_fault,
             pending_aux_output=pending_aux_output,
+            tp_fault_status=tp_fault_status,
         )
 
         # Collect KV transfer results now; finalize saves after the drafter runs.
@@ -2175,6 +2254,19 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if self.aux_output_connector is not None:
             self.aux_output_connector.close()
         set_offloader(None)
+        if getattr(getattr(self, "model", None), "supports_b12x_native_preparation", False):
+            from aphrodite.compilation.breakable_cudagraph import BreakableCUDAGraphWrapper
+            from aphrodite.compilation.cuda_graph import CUDAGraphWrapper
+
+            CUDAGraphWrapper.clear_all_graphs()
+            BreakableCUDAGraphWrapper.clear_all_graphs()
+            if self.cudagraph_manager is not None:
+                self.cudagraph_manager.clear()
+            if self.speculator is not None:
+                for value in vars(self.speculator).values():
+                    if isinstance(value, CudaGraphManager):
+                        value.clear()
+            self.execute_model_state = None
         self.cudagraph_manager = None
         self.fast_prefill = None
         self.pooling_runner = None

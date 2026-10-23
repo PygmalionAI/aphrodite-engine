@@ -1,6 +1,9 @@
 #include "ops.h"
 #include "cuda_utils.h"
 #include "core/registration.h"
+#if defined(APHRODITE_ENABLE_SM120_ENGRAM) && !defined(USE_ROCM)
+  #include "engram_sm120.h"
+#endif
 
 #include <torch/csrc/stable/library.h>
 
@@ -40,6 +43,17 @@ STABLE_TORCH_LIBRARY_FRAGMENT(_C, ops) {
       "    Tensor max_occurrences,"
       "    Tensor early_exit_match_len,"
       "    int vocab_size) -> (Tensor, Tensor, Tensor)");
+
+#if defined(APHRODITE_ENABLE_SM120_ENGRAM) && !defined(USE_ROCM)
+  ops.def(
+      "sm120_engram_pack(Tensor hidden, Tensor local_projection, "
+      "Tensor q_weight, Tensor k_weight, Tensor! packet, int rank, "
+      "int num_valid_tokens) -> ()");
+  ops.def(
+      "sm120_engram_finish(Tensor hidden, Tensor gathered_packets, "
+      "Tensor? token_mask, Tensor! output, int num_valid_tokens, float eps, "
+      "float clamp_value) -> ()");
+#endif
 
 #ifndef USE_ROCM
 
@@ -841,6 +855,10 @@ STABLE_TORCH_LIBRARY_IMPL(_C, CUDA, ops) {
   // LongCat n-gram embedding index kernel.
   ops.impl("ngram_compute_n_gram_ids", TORCH_BOX(&ngram_compute_n_gram_ids));
   ops.impl("vocab_parallel_embedding", TORCH_BOX(&vocab_parallel_embedding));
+#if defined(APHRODITE_ENABLE_SM120_ENGRAM) && !defined(USE_ROCM)
+  ops.impl("sm120_engram_pack", TORCH_BOX(&sm120_engram_pack));
+  ops.impl("sm120_engram_finish", TORCH_BOX(&sm120_engram_finish));
+#endif
 
   // Per-token group quantization
   ops.impl("per_token_group_fp8_quant", TORCH_BOX(&per_token_group_quant_fp8));

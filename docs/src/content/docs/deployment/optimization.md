@@ -191,6 +191,76 @@ checkpoint on the target GPU.
 Compare output quality with the unquantized checkpoint. Weight-only formats can
 affect model quality even when the serving interface is unchanged.
 
+### FP4 MoE on SM120 GPUs
+
+On SM120 GPUs, use `--moe-backend b12x` for supported FP4 MoE checkpoints.
+B12x is included in `flashinfer-python`. Do not install the archived standalone
+`b12x` package. If it is already installed, remove it and restore the bundled
+provider in the same environment as Sonar:
+
+```bash
+uv pip uninstall b12x
+uv pip install --reinstall --no-deps 'flashinfer-python==0.7.2'
+```
+
+B12x supports tensor parallelism, not expert parallelism. Do not combine it with
+`--enable-expert-parallel`.
+
+MXFP4 uses MXFP8 activations by default. Set
+`APHRODITE_B12X_MOE_FP4_FORCE_A16=1` to use 16-bit activations instead.
+This changes activation precision. Compare output quality and performance on
+your workload before you use it in production.
+
+By default, for DeepSeek-V4.1 on SM120, Sonar uses native FP8 sparse indexers from the bundled
+DeepGEMM, including 128-row KV-cache pages. If an external DeepGEMM package lacks
+the required APIs or SM120 headers, Sonar uses the Triton indexer instead.
+`APHRODITE_USE_DEEP_GEMM=0` forces that fallback; it does not select the MoE backend.
+General DeepGEMM GEMMs remain disabled on SM120.
+
+### Native DeepSeek-V4.1 backend on SM120
+
+Set `APHRODITE_DSV41_SM120_NATIVE=1` and pass
+`--attention-backend B12X_DSV41` when you launch DeepSeek-V4.1 to select the
+experimental native B12x backend. With DSpark, also set
+`"attention_backend": "B12X_DSV41"` in `--speculative-config`.
+
+This path uses packed compressed KV caches, native sparse attention, fused
+output projections, and native Engram lookup. It retains Sonar's MoE scheduling.
+
+Use the bundled B12x provider described above. The archived standalone package
+is not supported.
+
+Do not combine this path with pipeline parallelism, context parallelism, dual
+batch overlap, or LoRA. The existing backend remains the default. Remove the
+environment variable and the B12x attention-backend overrides to return to it.
+
+### Experimental paired PCIe all-reduce
+
+Set `APHRODITE_ALLREDUCE_USE_PCIE_PULL=1` to select the experimental paired
+all-reduce. Initial support targets the native DeepSeek-V4.1 backend on four
+SM120 GPUs in one node. All selected GPU pairs must support CUDA peer reads and
+writes without crossing a NUMA system link.
+
+This path requires the V2 model runner, BF16 activations, and a model hidden
+size of 5120. A speculative draft must use the same TP4 group. Keep adaptive
+verification disabled. Do not combine it with pipeline, context, data, or
+expert parallelism, dual batch overlap, LoRA, sleep mode, or KV offloading.
+Unsupported configurations fail during startup.
+
+The paired kernel handles contiguous two-dimensional tensors with 1–8 rows and
+a width of 5120 or 6144. Other shapes retain their existing collective backend.
+The reduction adds operands in rank order in FP32, then rounds once to BF16.
+This uses a different rounding contract from BF16 NCCL. Do not assume that
+the modes are numerically interchangeable.
+
+The engine checks a collective completion snapshot before it releases each
+step's tokens or logprobs. A protocol failure stops the engine; it does not
+switch the affected collective to NCCL or retry it. Restart the engine after
+such a failure.
+
+This option is disabled by default. Compare output quality and latency with
+the option disabled before you use it in a deployment.
+
 ## Choose parallelism
 
 Tensor parallelism splits model layers across GPUs and reduces weight memory on

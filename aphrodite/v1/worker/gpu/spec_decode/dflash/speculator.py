@@ -442,6 +442,9 @@ class DFlashSpeculator(DraftModelSpeculator):
         is_profile: bool = False,
         num_speculative_tokens: int | None = None,
     ) -> torch.Tensor:
+        use_global_cache_positions = getattr(
+            getattr(self, "model_state", None), "use_global_draft_cache_positions", False
+        )
         num_reqs = input_batch.num_reqs
         num_target_tokens = input_batch.num_tokens
         num_query_tokens = num_reqs * self.num_query_per_req
@@ -513,12 +516,11 @@ class DFlashSpeculator(DraftModelSpeculator):
                 self.max_num_tokens,
                 self.max_model_len,
                 self.sample_from_anchor,
+                use_global_cache_positions=use_global_cache_positions,
             )
 
-        # Cache-restored target tokens have no corresponding draft KV. Shift
-        # their whole DCP-virtual blocks out of the draft's view after slot
-        # mappings have been computed from the original table.
-        if not dummy_run:
+        # Dense drafts omit restored prefix blocks; sparse caches keep global positions.
+        if not dummy_run and not use_global_cache_positions:
             for gid in self.draft_kv_cache_group_ids:
                 shift_draft_block_tables(
                     self.block_tables.input_block_tables[gid],
@@ -674,6 +676,7 @@ def _prepare_dflash_inputs_kernel(
     CP_SIZE: tl.constexpr,
     CP_INTERLEAVE: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
+    GLOBAL_CACHE_POSITIONS: tl.constexpr = False,
 ):
     req_idx = tl.program_id(0)
     block_idx = tl.program_id(1)
@@ -784,12 +787,11 @@ def _prepare_dflash_inputs_kernel(
 
     if block_idx == 0:
         tl.store(out_query_start_loc_ptr + req_idx, query_base)
-        # Hide whole DCP-virtual blocks restored without a target forward;
-        # those slots never received draft KV. Keep global sequence lengths,
-        # because the dense attention metadata builder localizes them for DCP.
-        num_cached = tl.load(num_cached_tokens_ptr + req_state_idx)
-        virtual_block_size = block_size * CP_SIZE
-        num_shifted_tokens = (num_cached // virtual_block_size) * virtual_block_size
+        num_shifted_tokens = 0
+        if not GLOBAL_CACHE_POSITIONS:
+            num_cached = tl.load(num_cached_tokens_ptr + req_state_idx)
+            virtual_block_size = block_size * CP_SIZE
+            num_shifted_tokens = (num_cached // virtual_block_size) * virtual_block_size
         tl.store(
             out_seq_lens_ptr + req_idx,
             tl.maximum(
@@ -876,6 +878,7 @@ def prepare_dflash_inputs(
     max_num_tokens: int,
     max_model_len: int,
     sample_from_anchor: bool = False,
+    use_global_cache_positions: bool = False,
 ) -> None:
     num_reqs = input_batch.num_reqs
     assert num_reqs > 0
@@ -924,6 +927,7 @@ def prepare_dflash_inputs(
         CP_SIZE=cp_size,
         CP_INTERLEAVE=cp_interleave,
         BLOCK_SIZE=BLOCK_SIZE,
+        GLOBAL_CACHE_POSITIONS=use_global_cache_positions,
     )
 
 

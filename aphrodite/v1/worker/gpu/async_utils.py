@@ -122,6 +122,7 @@ class AsyncOutput(AsyncModelRunnerOutput):
         copy_stream: torch.cuda.Stream,
         check_ep_fault: bool,
         pending_aux_output: "PendingAuxOutput | None",
+        tp_fault_status: torch.Tensor | None = None,
     ):
         # NOTE(woosuk): We must retain references to the GPU tensors,
         # as the copy operations are performed on a different CUDA stream than
@@ -133,6 +134,8 @@ class AsyncOutput(AsyncModelRunnerOutput):
         # Blocking (sleep) event to avoid busy-polling the CUDA driver lock.
         self.copy_event = torch.cuda.Event(blocking=True)
         self._has_fault: torch.Tensor | None = None
+        self._tp_fault_status_gpu = tp_fault_status
+        self._tp_fault_status_cpu: torch.Tensor | None = None
 
         with stream(copy_stream, main_stream):
             copy_stream.wait_stream(main_stream)
@@ -164,10 +167,19 @@ class AsyncOutput(AsyncModelRunnerOutput):
             if check_ep_fault:
                 has_fault = get_ep_all2all_manager().query_fault()
                 self._has_fault = has_fault.to("cpu", non_blocking=True)
+            if tp_fault_status is not None:
+                self._tp_fault_status_cpu = tp_fault_status.to("cpu", non_blocking=True, copy=True)
+                if tp_fault_status.is_cuda:
+                    tp_fault_status.record_stream(copy_stream)
             self.copy_event.record(copy_stream)
 
     def get_output(self) -> ModelRunnerOutput:
         self.copy_event.synchronize()
+        if self._tp_fault_status_cpu is not None and (error := self._tp_fault_status_cpu.item()):
+            raise RuntimeError(
+                f"TP PCIe pull all-reduce failed (code {int(error)}); "
+                "the engine must be restarted before serving more requests."
+            )
 
         # NOTE(woosuk): The following code is to ensure compatibility with
         # the existing model runner.

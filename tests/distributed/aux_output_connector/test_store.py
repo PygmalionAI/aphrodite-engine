@@ -267,6 +267,30 @@ def test_next_step_does_not_consume_pending_output(monkeypatch):
     worker.close()
 
 
+def test_tp_failure_does_not_release_tokens_or_aux_output(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "Event", lambda **kwargs: Mock())
+    monkeypatch.setattr(async_utils, "stream", lambda *args: nullcontext())
+    pending = Mock()
+    status = torch.tensor([7], dtype=torch.int64)
+    result = ModelRunnerOutput(["request"], {"request": 0})
+    output = async_utils.AsyncOutput(
+        result,
+        SamplerOutput(torch.tensor([[7]]), None, None, None, num_rejected=torch.tensor([0])),
+        torch.tensor([1]),
+        Mock(),
+        Mock(),
+        check_ep_fault=False,
+        pending_aux_output=pending,
+        tp_fault_status=status,
+    )
+    status.zero_()
+
+    with pytest.raises(RuntimeError, match="TP PCIe pull all-reduce failed"):
+        output.get_output()
+
+    pending.process_output.assert_not_called()
+
+
 @pytest.mark.parametrize("num_pending", [1, 2])
 def test_finished_request_teardown_waits_for_pending_output(num_pending):
     """Terminal cleanup waits for every outstanding output, not just the first."""
