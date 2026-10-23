@@ -470,7 +470,10 @@ if(APHRODITE_GPU_LANG STREQUAL "CUDA" OR APHRODITE_GPU_LANG STREQUAL "HIP")
 
   if(APHRODITE_GPU_LANG STREQUAL "CUDA")
     list(APPEND APHRODITE_STABLE_EXT_SRC
+      "csrc/pcie_pull_all_reduce.cu"
       "csrc/fused_qknorm_rope_cache_kernel.cu")
+    set_property(SOURCE "csrc/pcie_pull_all_reduce.cu" APPEND PROPERTY
+      COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CUDA>:--ftz=false;--fmad=false>")
   endif()
 
   if(APHRODITE_GPU_LANG STREQUAL "CUDA" AND

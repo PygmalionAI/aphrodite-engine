@@ -39,7 +39,7 @@ from aphrodite.distributed.aux_output_connector.worker import (
     AuxOutputWorkerConnector,
     get_aux_output_connector,
 )
-from aphrodite.distributed.parallel_state import get_dcp_group, get_pp_group
+from aphrodite.distributed.parallel_state import get_dcp_group, get_pp_group, get_tp_group
 from aphrodite.forward_context import BatchDescriptor, set_forward_context
 from aphrodite.logger import init_logger
 from aphrodite.model_executor.layers.fused_moe.all2all_utils import get_ep_all2all_manager
@@ -216,6 +216,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.jit_warmup_registry = JitWarmupRegistry(aphrodite_config)
 
         self.device = device
+        self._pcie_pull_comm = getattr(get_tp_group().device_communicator, "pcie_pull_ar_comm", None)
         self.dtype = self.model_config.dtype
         self.kv_cache_dtype = self.dtype
         if self.cache_config.cache_dtype != "auto":
@@ -2101,6 +2102,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if self.aux_output_connector is not None:
             pending_aux_output = self.aux_output_connector.prepare_output(input_batch)
 
+        tp_fault_status = None
+        if self._pcie_pull_comm is not None and self._pcie_pull_comm.initialized:
+            tp_fault_status = self._pcie_pull_comm.close_step()
         # Start async output copy here so that it can overlap with speculator proposal.
         async_output = AsyncOutput(
             model_runner_output=model_runner_output,
@@ -2110,6 +2114,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             copy_stream=self.output_copy_stream,
             check_ep_fault=self.check_ep_fault,
             pending_aux_output=pending_aux_output,
+            tp_fault_status=tp_fault_status,
         )
 
         # Collect KV transfer results now; finalize saves after the drafter runs.

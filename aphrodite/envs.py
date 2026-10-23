@@ -274,6 +274,7 @@ if TYPE_CHECKING:
     APHRODITE_ALLREDUCE_USE_SYMM_MEM: bool = True
     APHRODITE_ALLREDUCE_USE_FLASHINFER: bool = True
     APHRODITE_ALLREDUCE_USE_FLASHINFER_PCIE_IPC: bool = False
+    APHRODITE_ALLREDUCE_USE_PCIE_PULL: bool = False
     APHRODITE_TUNED_CONFIG_FOLDER: str | None = None
     APHRODITE_ENABLE_STARTUP_PLAN: bool = False
     APHRODITE_GPT_OSS_SYSTEM_TOOL_MCP_LABELS: set[str] = set()
@@ -1727,6 +1728,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "APHRODITE_ALLREDUCE_USE_FLASHINFER_PCIE_IPC": lambda: bool(
         int(os.getenv("APHRODITE_ALLREDUCE_USE_FLASHINFER_PCIE_IPC", "0"))
     ),
+    # Use the fixed-order, single-lane SM120 TP4 staged PCIe pull backend.
+    "APHRODITE_ALLREDUCE_USE_PCIE_PULL": lambda: bool(int(os.getenv("APHRODITE_ALLREDUCE_USE_PCIE_PULL", "0"))),
     # Experimental: use this to enable MCP tool calling for non harmony models
     "APHRODITE_USE_EXPERIMENTAL_PARSER_CONTEXT": lambda: bool(
         int(os.getenv("APHRODITE_USE_EXPERIMENTAL_PARSER_CONTEXT", "0"))

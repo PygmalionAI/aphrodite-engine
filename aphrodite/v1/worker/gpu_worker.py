@@ -479,6 +479,13 @@ class Worker(WorkerBase):
                 self.local_rank,
                 current_platform.dist_backend,
             )
+            pcie_pull_comm = getattr(get_tp_group().device_communicator, "pcie_pull_ar_comm", None)
+            self._pcie_pull_comm = pcie_pull_comm
+            if pcie_pull_comm is not None:
+                pcie_pull_comm.initialize(
+                    self.aphrodite_config,
+                    use_v2_model_runner=self.use_v2_model_runner,
+                )
 
             if self.use_v2_model_runner:
                 logger.info_once("Using V2 Model Runner")
@@ -1062,6 +1069,10 @@ class Worker(WorkerBase):
 
             trigger_inductor_lazy_init(self.device)
 
+        pcie_pull_comm = getattr(self, "_pcie_pull_comm", None)
+        if pcie_pull_comm is not None:
+            pcie_pull_comm.validate_startup()
+
         # All warmup is done — start monitoring for unexpected JIT
         # compilations that would cause latency spikes during inference.
         self._maybe_activate_jit_monitor()
@@ -1561,6 +1572,12 @@ class Worker(WorkerBase):
             # model runner has dropped its graphs and cache aliases.
             session.close()
             self._b12x_session = None
+        pcie_pull_comm = getattr(self, "_pcie_pull_comm", None)
+        if pcie_pull_comm is not None:
+            try:
+                pcie_pull_comm.destroy()
+            except Exception:
+                logger.exception("Could not retire the PCIe pull workspace; retaining it until process exit")
 
         # Release kept-alive cumem pools while the pluggable allocator wrappers
         # and callbacks are still alive, so MemPool teardown is not deferred to

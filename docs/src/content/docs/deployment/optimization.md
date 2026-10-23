@@ -234,6 +234,33 @@ Do not combine this path with pipeline parallelism, context parallelism, dual
 batch overlap, or LoRA. The existing backend remains the default. Remove the
 environment variable and the B12x attention-backend overrides to return to it.
 
+### Experimental paired PCIe all-reduce
+
+Set `APHRODITE_ALLREDUCE_USE_PCIE_PULL=1` to select the experimental paired
+all-reduce. Initial support targets the native DeepSeek-V4.1 backend on four
+SM120 GPUs in one node. All selected GPU pairs must support CUDA peer reads and
+writes without crossing a NUMA system link.
+
+This path requires the V2 model runner, BF16 activations, and a model hidden
+size of 5120. A speculative draft must use the same TP4 group. Keep adaptive
+verification disabled. Do not combine it with pipeline, context, data, or
+expert parallelism, dual batch overlap, LoRA, sleep mode, or KV offloading.
+Unsupported configurations fail during startup.
+
+The paired kernel handles contiguous two-dimensional tensors with 1–8 rows and
+a width of 5120 or 6144. Other shapes retain their existing collective backend.
+The reduction adds operands in rank order in FP32, then rounds once to BF16.
+This uses a different rounding contract from BF16 NCCL. Do not assume that
+the modes are numerically interchangeable.
+
+The engine checks a collective completion snapshot before it releases each
+step's tokens or logprobs. A protocol failure stops the engine; it does not
+switch the affected collective to NCCL or retry it. Restart the engine after
+such a failure.
+
+This option is disabled by default. Compare output quality and latency with
+the option disabled before you use it in a deployment.
+
 ## Choose parallelism
 
 Tensor parallelism splits model layers across GPUs and reduces weight memory on
